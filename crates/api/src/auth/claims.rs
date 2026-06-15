@@ -2,7 +2,10 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{error::AppError, models::workspace::{MemberRole, WorkspaceKind}};
+use crate::{
+    error::AppError,
+    models::workspace::{MemberRole, WorkspaceKind},
+};
 
 pub const ACCESS_TOKEN_TTL_SECS: i64 = 15 * 60;
 

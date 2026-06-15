@@ -24,7 +24,10 @@ use super::authz::AuthContext;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/workspaces", get(list_workspaces).post(create_workspace))
-        .route("/workspaces/:id", get(get_workspace).patch(update_workspace))
+        .route(
+            "/workspaces/:id",
+            get(get_workspace).patch(update_workspace),
+        )
         .route("/workspaces/:id/activate", post(activate_workspace))
         .route("/workspaces/:id/members", get(list_members))
         .route("/workspaces/:id/members/:uid", delete(remove_member))
@@ -99,7 +102,9 @@ async fn create_workspace(
 ) -> Result<impl IntoResponse, AppError> {
     let name = body.name.trim();
     if name.is_empty() || name.len() > 100 {
-        return Err(AppError::BadRequest("workspace name must be 1–100 characters".into()));
+        return Err(AppError::BadRequest(
+            "workspace name must be 1–100 characters".into(),
+        ));
     }
 
     let id = Uuid::new_v4();
@@ -108,7 +113,10 @@ async fn create_workspace(
     let mut tx = state.pool.begin().await?;
     sqlx::query!(
         "INSERT INTO workspaces (id, name, kind, created_at) VALUES ($1,$2,$3,$4)",
-        id, name, body.kind as _, now
+        id,
+        name,
+        body.kind as _,
+        now
     )
     .execute(&mut *tx)
     .await?;
@@ -164,14 +172,18 @@ async fn update_workspace(
     Json(body): Json<UpdateWorkspaceRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if auth.workspace_id != id {
-        return Err(AppError::Forbidden("can only update active workspace".into()));
+        return Err(AppError::Forbidden(
+            "can only update active workspace".into(),
+        ));
     }
     auth.require_owner()?;
 
     if let Some(name) = body.name {
         let name = name.trim().to_owned();
         if name.is_empty() || name.len() > 100 {
-            return Err(AppError::BadRequest("workspace name must be 1–100 characters".into()));
+            return Err(AppError::BadRequest(
+                "workspace name must be 1–100 characters".into(),
+            ));
         }
         sqlx::query!("UPDATE workspaces SET name = $1 WHERE id = $2", name, id)
             .execute(&state.pool)
@@ -192,7 +204,8 @@ async fn activate_workspace(
            FROM workspaces w
            JOIN workspace_members wm ON wm.workspace_id = w.id
            WHERE w.id = $1 AND wm.user_id = $2"#,
-        target_id, auth.user_id
+        target_id,
+        auth.user_id
     )
     .fetch_optional(&state.pool)
     .await?
@@ -262,11 +275,13 @@ async fn remove_member(
     )
     .fetch_one(&state.pool)
     .await?
-    .unwrap_or(0) <= 1;
+    .unwrap_or(0)
+        <= 1;
 
     let target_role = sqlx::query_scalar!(
         r#"SELECT role::text FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"#,
-        workspace_id, target_uid
+        workspace_id,
+        target_uid
     )
     .fetch_optional(&state.pool)
     .await?;
@@ -277,7 +292,8 @@ async fn remove_member(
 
     sqlx::query!(
         "DELETE FROM workspace_members WHERE user_id = $1 AND workspace_id = $2",
-        target_uid, workspace_id
+        target_uid,
+        workspace_id
     )
     .execute(&state.pool)
     .await?;

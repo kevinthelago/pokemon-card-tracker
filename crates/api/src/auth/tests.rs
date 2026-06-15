@@ -55,7 +55,7 @@ mod unit_tests {
     #[test]
     fn test_jwt_wrong_secret_fails() {
         let secret = b"test-secret-at-least-32-bytes-long!!";
-        let wrong  = b"wrong-secret-at-least-32-bytes-lon!";
+        let wrong = b"wrong-secret-at-least-32-bytes-lon!";
         let now = Utc::now();
         let claims = Claims {
             sub: Uuid::new_v4(),

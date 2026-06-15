@@ -44,7 +44,10 @@ where
 
         let secret = service::jwt_secret();
         let claims = claims::decode_access_token(token, secret.as_bytes())?;
-        Ok(AuthUser { id: claims.sub, email: claims.email })
+        Ok(AuthUser {
+            id: claims.sub,
+            email: claims.email,
+        })
     }
 }
 
@@ -78,8 +81,7 @@ pub fn build_mailer() -> anyhow::Result<AsyncSmtpTransport<Tokio1Executor>> {
     let username = std::env::var("SMTP_USERNAME").unwrap_or_default();
     let password = std::env::var("SMTP_PASSWORD").unwrap_or_default();
 
-    let mut builder =
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?.port(port);
+    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?.port(port);
 
     if !username.is_empty() {
         builder = builder.credentials(Credentials::new(username, password));

@@ -115,7 +115,10 @@ async fn logout(
         .http_only(true)
         .build();
 
-    Ok((StatusCode::NO_CONTENT, set_cookie_headers(clear.to_string())))
+    Ok((
+        StatusCode::NO_CONTENT,
+        set_cookie_headers(clear.to_string()),
+    ))
 }
 
 async fn verify_email(

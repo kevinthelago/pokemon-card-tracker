@@ -79,13 +79,10 @@ pub async fn register(
     validate_name(name)?;
     validate_password(password)?;
 
-    let exists = sqlx::query_scalar!(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)",
-        email
-    )
-    .fetch_one(&state.pool)
-    .await?
-    .unwrap_or(false);
+    let exists = sqlx::query_scalar!("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", email)
+        .fetch_one(&state.pool)
+        .await?
+        .unwrap_or(false);
 
     if exists {
         return Err(AppError::Conflict("email already registered".into()));
@@ -101,14 +98,20 @@ pub async fn register(
 
     sqlx::query!(
         "INSERT INTO users (id, email, name, password_hash, created_at) VALUES ($1,$2,$3,$4,$5)",
-        user_id, email, name, password_hash, now
+        user_id,
+        email,
+        name,
+        password_hash,
+        now
     )
     .execute(&mut *tx)
     .await?;
 
     sqlx::query!(
         "INSERT INTO workspaces (id, name, kind, created_at) VALUES ($1,$2,'collector',$3)",
-        workspace_id, workspace_name, now
+        workspace_id,
+        workspace_name,
+        now
     )
     .execute(&mut *tx)
     .await?;
@@ -135,10 +138,25 @@ pub async fn register(
     let verify_url = format!("{}/auth/verify-email?token={}", state.base_url, raw_ev);
     let _ = send_verification_email(&state.mailer, &email_from(), email, &verify_url).await;
 
-    let (access_token, refresh_token) =
-        issue_tokens(state, user_id, email, workspace_id, WorkspaceKind::Collector, MemberRole::Owner, None).await?;
+    let (access_token, refresh_token) = issue_tokens(
+        state,
+        user_id,
+        email,
+        workspace_id,
+        WorkspaceKind::Collector,
+        MemberRole::Owner,
+        None,
+    )
+    .await?;
 
-    Ok(AuthResponse { access_token, refresh_token, user_id, email: email.to_owned(), name: name.to_owned(), workspace_id })
+    Ok(AuthResponse {
+        access_token,
+        refresh_token,
+        user_id,
+        email: email.to_owned(),
+        name: name.to_owned(),
+        workspace_id,
+    })
 }
 
 // ─── Login ────────────────────────────────────────────────────────────────────
@@ -182,8 +200,16 @@ pub async fn login(
     .fetch_one(&state.pool)
     .await?;
 
-    let (access_token, refresh_token) =
-        issue_tokens(state, user.id, &user.email, row.id, row.kind, row.role, None).await?;
+    let (access_token, refresh_token) = issue_tokens(
+        state,
+        user.id,
+        &user.email,
+        row.id,
+        row.kind,
+        row.role,
+        None,
+    )
+    .await?;
 
     Ok(AuthResponse {
         access_token,
@@ -213,7 +239,8 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
         // Reuse detected — revoke entire family
         sqlx::query!(
             "UPDATE refresh_tokens SET revoked_at = $1 WHERE family_id = $2 AND revoked_at IS NULL",
-            now, row.family_id
+            now,
+            row.family_id
         )
         .execute(&state.pool)
         .await?;
@@ -226,14 +253,18 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
     // Rotate: revoke old, issue new in same family
     sqlx::query!(
         "UPDATE refresh_tokens SET revoked_at = $1 WHERE id = $2",
-        now, row.id
+        now,
+        row.id
     )
     .execute(&state.pool)
     .await?;
 
-    let user = sqlx::query!("SELECT id, email, name FROM users WHERE id = $1", row.user_id)
-        .fetch_one(&state.pool)
-        .await?;
+    let user = sqlx::query!(
+        "SELECT id, email, name FROM users WHERE id = $1",
+        row.user_id
+    )
+    .fetch_one(&state.pool)
+    .await?;
 
     let ws = sqlx::query!(
         r#"SELECT w.id, w.kind AS "kind: WorkspaceKind", wm.role AS "role: MemberRole"
@@ -247,8 +278,16 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
     .fetch_one(&state.pool)
     .await?;
 
-    let (access_token, refresh_token) =
-        issue_tokens(state, user.id, &user.email, ws.id, ws.kind, ws.role, Some(row.family_id)).await?;
+    let (access_token, refresh_token) = issue_tokens(
+        state,
+        user.id,
+        &user.email,
+        ws.id,
+        ws.kind,
+        ws.role,
+        Some(row.family_id),
+    )
+    .await?;
 
     Ok(AuthResponse {
         access_token,
@@ -295,10 +334,20 @@ pub async fn verify_email(state: &AppState, raw_token: &str) -> Result<(), AppEr
     }
 
     let mut tx = state.pool.begin().await?;
-    sqlx::query!("UPDATE email_verifications SET used_at = $1 WHERE id = $2", now, row.id)
-        .execute(&mut *tx).await?;
-    sqlx::query!("UPDATE users SET email_verified_at = $1 WHERE id = $2", now, row.user_id)
-        .execute(&mut *tx).await?;
+    sqlx::query!(
+        "UPDATE email_verifications SET used_at = $1 WHERE id = $2",
+        now,
+        row.id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "UPDATE users SET email_verified_at = $1 WHERE id = $2",
+        now,
+        row.user_id
+    )
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -356,15 +405,27 @@ pub async fn confirm_password_reset(
 
     let new_hash = hash_password(new_password)?;
     let mut tx = state.pool.begin().await?;
-    sqlx::query!("UPDATE users SET password_hash = $1 WHERE id = $2", new_hash, row.user_id)
-        .execute(&mut *tx).await?;
-    sqlx::query!("UPDATE password_resets SET used_at = $1 WHERE id = $2", now, row.id)
-        .execute(&mut *tx).await?;
+    sqlx::query!(
+        "UPDATE users SET password_hash = $1 WHERE id = $2",
+        new_hash,
+        row.user_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "UPDATE password_resets SET used_at = $1 WHERE id = $2",
+        now,
+        row.id
+    )
+    .execute(&mut *tx)
+    .await?;
     sqlx::query!(
         "UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
-        now, row.user_id
+        now,
+        row.user_id
     )
-    .execute(&mut *tx).await?;
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(())
 }

@@ -1,9 +1,9 @@
 use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos_router::components::A;
-use wasm_bindgen_futures::spawn_local;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use wasm_bindgen_futures::spawn_local;
 
 use super::session::{use_access_token, use_session};
 
@@ -16,11 +16,7 @@ struct WorkspaceDto {
     kind: String,
 }
 
-async fn api_create_workspace(
-    name: &str,
-    kind: &str,
-    token: &str,
-) -> Result<WorkspaceDto, String> {
+async fn api_create_workspace(name: &str, kind: &str, token: &str) -> Result<WorkspaceDto, String> {
     let resp = Request::post(&format!("{API}/workspaces"))
         .header("Authorization", &format!("Bearer {token}"))
         .json(&serde_json::json!({ "name": name, "kind": kind }))
@@ -228,7 +224,9 @@ async fn api_list_workspaces(token: &str) -> Result<Vec<WorkspaceListItem>, Stri
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    resp.json::<Vec<WorkspaceListItem>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<WorkspaceListItem>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 async fn api_activate_workspace(workspace_id: Uuid, token: &str) -> Result<String, String> {

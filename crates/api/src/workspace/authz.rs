@@ -77,7 +77,9 @@ impl AuthContext {
     pub fn require_seller(&self) -> Result<(), AppError> {
         match self.workspace_kind {
             WorkspaceKind::Seller => Ok(()),
-            WorkspaceKind::Collector => Err(AppError::Forbidden("seller workspace required".into())),
+            WorkspaceKind::Collector => {
+                Err(AppError::Forbidden("seller workspace required".into()))
+            }
         }
     }
 

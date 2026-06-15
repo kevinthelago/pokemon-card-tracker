@@ -14,8 +14,13 @@ pub async fn send_verification_email(
         "Welcome to CardGuard!\n\nVerify your email address:\n{verify_url}\n\nThis link expires in 24 hours."
     );
     let msg = Message::builder()
-        .from(from.parse().map_err(|e| AppError::Other(anyhow::anyhow!("bad from addr: {e}")))?)
-        .to(to.parse().map_err(|e| AppError::Other(anyhow::anyhow!("bad to addr: {e}")))?)
+        .from(
+            from.parse()
+                .map_err(|e| AppError::Other(anyhow::anyhow!("bad from addr: {e}")))?,
+        )
+        .to(to
+            .parse()
+            .map_err(|e| AppError::Other(anyhow::anyhow!("bad to addr: {e}")))?)
         .subject("Verify your CardGuard email")
         .header(ContentType::TEXT_PLAIN)
         .body(body)
@@ -37,8 +42,13 @@ pub async fn send_password_reset_email(
         "Someone requested a password reset for your CardGuard account.\n\nReset your password:\n{reset_url}\n\nThis link expires in 1 hour. If you didn't request this, you can ignore this email."
     );
     let msg = Message::builder()
-        .from(from.parse().map_err(|e| AppError::Other(anyhow::anyhow!("bad from addr: {e}")))?)
-        .to(to.parse().map_err(|e| AppError::Other(anyhow::anyhow!("bad to addr: {e}")))?)
+        .from(
+            from.parse()
+                .map_err(|e| AppError::Other(anyhow::anyhow!("bad from addr: {e}")))?,
+        )
+        .to(to
+            .parse()
+            .map_err(|e| AppError::Other(anyhow::anyhow!("bad to addr: {e}")))?)
         .subject("Reset your CardGuard password")
         .header(ContentType::TEXT_PLAIN)
         .body(body)

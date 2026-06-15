@@ -1,9 +1,18 @@
 [advisories]
 version = 2
-ignore = []
+# Unmaintained transitive deps from third-party dependencies we cannot easily replace.
+# Re-evaluate when upgrading httpmock, proc-macro-error2, encoding, paste.
+ignore = [
+    "RUSTSEC-2025-0052", # async-std discontinued (pulled by httpmock)
+    "RUSTSEC-2021-0153", # encoding unmaintained
+    "RUSTSEC-2024-0436", # paste no longer maintained
+    "RUSTSEC-2026-0173", # proc-macro-error2 unmaintained
+]
 
 [licenses]
 version = 2
+# Ignore our private (unpublished) workspace crates — they are proprietary.
+private = { ignore = true }
 allow = [
     "MIT",
     "Apache-2.0",
@@ -17,12 +26,16 @@ allow = [
     "Zlib",
     "OpenSSL",
     "MPL-2.0",
+    "0BSD",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
 ]
 exceptions = []
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+allow-wildcard-paths = true
 highlight = "all"
 workspace-default-features = "allow"
 external-default-features = "allow"

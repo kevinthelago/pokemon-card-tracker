@@ -109,7 +109,9 @@ pub async fn api_login(email: &str, password: &str) -> Result<AuthApiResponse, S
             .to_owned());
     }
 
-    resp.json::<AuthApiResponse>().await.map_err(|e| e.to_string())
+    resp.json::<AuthApiResponse>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 pub async fn api_register(
@@ -133,13 +135,13 @@ pub async fn api_register(
             .to_owned());
     }
 
-    resp.json::<AuthApiResponse>().await.map_err(|e| e.to_string())
+    resp.json::<AuthApiResponse>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 pub async fn api_logout() {
-    let _ = Request::post(&format!("{API}/auth/logout"))
-        .send()
-        .await;
+    let _ = Request::post(&format!("{API}/auth/logout")).send().await;
 }
 
 pub async fn api_refresh() -> Result<AuthApiResponse, String> {
@@ -151,5 +153,7 @@ pub async fn api_refresh() -> Result<AuthApiResponse, String> {
     if !resp.ok() {
         return Err("Session expired".into());
     }
-    resp.json::<AuthApiResponse>().await.map_err(|e| e.to_string())
+    resp.json::<AuthApiResponse>()
+        .await
+        .map_err(|e| e.to_string())
 }

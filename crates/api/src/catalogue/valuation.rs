@@ -479,8 +479,7 @@ pub fn spawn_valuation_refresh_scheduler(
     svc: Arc<ValuationService>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval =
-            tokio::time::interval(tokio::time::Duration::from_secs(24 * 3600));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(24 * 3600));
         loop {
             interval.tick().await;
             match svc.refresh_all().await {

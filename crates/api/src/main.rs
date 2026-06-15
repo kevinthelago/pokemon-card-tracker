@@ -3,10 +3,8 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::Extension;
 use cardguard_api::{
-    app, auth, catalogue, crypto::EncryptionKey,
-    grading::GradingService,
-    integrations::pokemontcg::PokemonTcgClient,
-    pos, NullPosProvider, PosProvider,
+    app, auth, catalogue, crypto::EncryptionKey, grading::GradingService,
+    integrations::pokemontcg::PokemonTcgClient, pos, NullPosProvider, PosProvider,
 };
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
@@ -33,8 +31,7 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to run migrations")?;
 
     let mailer = auth::build_mailer()?;
-    let base_url =
-        std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
+    let base_url = std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
     let encryption_key_hex =
         std::env::var("ENCRYPTION_KEY").context("ENCRYPTION_KEY must be set")?;
@@ -53,7 +50,15 @@ async fn main() -> anyhow::Result<()> {
 
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client, grading, valuation };
+    let state = app::AppState {
+        pool,
+        mailer,
+        base_url,
+        encryption_key,
+        tcg_client,
+        grading,
+        valuation,
+    };
 
     let router = app::create_router()
         .merge(pos::reconcile::routes())
