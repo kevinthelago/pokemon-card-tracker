@@ -46,15 +46,30 @@ pub fn PosSettingsPage() -> impl IntoView {
         async move { api::fetch_pos_connections(wid).await.ok().unwrap_or_default() }
     });
 
-    let (disconnect_error, set_disconnect_error) = signal(Option::<String>::None);
+    let (action_error, set_action_error) = signal(Option::<String>::None);
 
     let do_disconnect = move |connection_id: Uuid| {
         let wid = workspace_id();
-        set_disconnect_error.set(None);
+        set_action_error.set(None);
         leptos::task::spawn_local(async move {
             match api::disconnect_pos(wid, connection_id).await {
                 Ok(()) => set_reload.update(|n| *n += 1),
-                Err(e) => set_disconnect_error.set(Some(e)),
+                Err(e) => set_action_error.set(Some(e)),
+            }
+        });
+    };
+
+    let do_reconnect = move |provider: String| {
+        let wid = workspace_id();
+        set_action_error.set(None);
+        leptos::task::spawn_local(async move {
+            match api::start_pos_oauth(wid, Box::leak(provider.into_boxed_str())).await {
+                Ok(url) => {
+                    if let Some(window) = web_sys::window() {
+                        let _ = window.location().set_href(&url);
+                    }
+                }
+                Err(e) => set_action_error.set(Some(e)),
             }
         });
     };
@@ -70,9 +85,9 @@ pub fn PosSettingsPage() -> impl IntoView {
 
             <ConnectSection workspace_id=workspace_id />
 
-            {move || disconnect_error.get().map(|e| view! {
+            {move || action_error.get().map(|e| view! {
                 <div class="bg-red-50 border border-red-200 rounded p-3 text-red-700 text-sm">
-                    {format!("Disconnect failed: {e}")}
+                    {e}
                 </div>
             })}
 
@@ -85,7 +100,11 @@ pub fn PosSettingsPage() -> impl IntoView {
                             view! { <EmptyState /> }.into_any()
                         } else {
                             view! {
-                                <ConnectionList connections=conns.to_vec() on_disconnect=do_disconnect />
+                                <ConnectionList
+                                    connections=conns.to_vec()
+                                    on_disconnect=do_disconnect
+                                    on_reconnect=do_reconnect
+                                />
                             }.into_any()
                         }
                     })
@@ -194,6 +213,7 @@ fn ProviderButton(
 fn ConnectionList(
     connections: Vec<PosConnectionDto>,
     on_disconnect: impl Fn(Uuid) + 'static + Clone,
+    on_reconnect: impl Fn(String) + 'static + Clone,
 ) -> impl IntoView {
     view! {
         <div class="space-y-3">
@@ -201,7 +221,8 @@ fn ConnectionList(
                 .into_iter()
                 .map(|conn| {
                     let on_disc = on_disconnect.clone();
-                    view! { <ConnectionCard conn=conn on_disconnect=on_disc /> }
+                    let on_rec = on_reconnect.clone();
+                    view! { <ConnectionCard conn=conn on_disconnect=on_disc on_reconnect=on_rec /> }
                 })
                 .collect_view()}
         </div>
@@ -209,8 +230,14 @@ fn ConnectionList(
 }
 
 #[component]
-fn ConnectionCard(conn: PosConnectionDto, on_disconnect: impl Fn(Uuid) + 'static) -> impl IntoView {
+fn ConnectionCard(
+    conn: PosConnectionDto,
+    on_disconnect: impl Fn(Uuid) + 'static,
+    on_reconnect: impl Fn(String) + 'static,
+) -> impl IntoView {
     let id = conn.id;
+    let provider_for_reconnect = conn.provider.clone();
+    let is_error = conn.status == "error";
     let status_class = match conn.status.as_str() {
         "active" => "bg-green-100 text-green-700",
         "error" => "bg-red-100 text-red-700",
@@ -219,7 +246,7 @@ fn ConnectionCard(conn: PosConnectionDto, on_disconnect: impl Fn(Uuid) + 'static
     };
     let status_label = match conn.status.as_str() {
         "active" => "Active",
-        "error" => "Error",
+        "error" => "Error — reconnect required",
         "pending" => "Connecting…",
         _ => "Disconnected",
     };
@@ -230,7 +257,10 @@ fn ConnectionCard(conn: PosConnectionDto, on_disconnect: impl Fn(Uuid) + 'static
         .unwrap_or_else(|| "Never".to_string());
 
     view! {
-        <div class="bg-white border border-gray-200 rounded-lg p-4 flex items-start justify-between gap-4">
+        <div class=move || {
+            let border = if is_error { "border-red-200" } else { "border-gray-200" };
+            format!("bg-white border {border} rounded-lg p-4 flex items-start justify-between gap-4")
+        }>
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <span class="font-medium text-gray-900">{conn.provider_display}</span>
@@ -251,12 +281,26 @@ fn ConnectionCard(conn: PosConnectionDto, on_disconnect: impl Fn(Uuid) + 'static
                 })}
             </div>
 
-            <button
-                class="text-sm text-red-600 hover:text-red-800 whitespace-nowrap"
-                on:click=move |_| on_disconnect(id)
-            >
-                "Disconnect"
-            </button>
+            <div class="flex flex-col gap-1 items-end shrink-0">
+                {if is_error {
+                    view! {
+                        <button
+                            class="text-sm text-blue-600 hover:text-blue-800 whitespace-nowrap font-medium"
+                            on:click=move |_| on_reconnect(provider_for_reconnect.clone())
+                        >
+                            "Reconnect"
+                        </button>
+                    }.into_any()
+                } else {
+                    view! { <span /> }.into_any()
+                }}
+                <button
+                    class="text-sm text-red-600 hover:text-red-800 whitespace-nowrap"
+                    on:click=move |_| on_disconnect(id)
+                >
+                    "Disconnect"
+                </button>
+            </div>
         </div>
     }
 }
@@ -273,6 +317,11 @@ fn EmptyState() -> impl IntoView {
             <h3 class="text-base font-medium text-gray-900">"No POS connected"</h3>
             <p class="mt-1 text-sm text-gray-500">
                 "Connect a POS system above to sync your inventory automatically."
+            </p>
+            <p class="mt-2 text-xs text-gray-400">
+                "CSV import is always available as an alternative under "
+                <span class="font-medium">"Catalogue → Import"</span>
+                "."
             </p>
         </div>
     }
