@@ -21,7 +21,13 @@ use axum::{
 
 use crate::app::AppState;
 
-/// CSV import / export routes.  Mount with:
+/// Inventory browse/manage routes. Mount with:
+///   `.merge(catalogue::routes())`
+pub fn routes() -> Router<AppState> {
+    Router::new().merge(inventory::routes())
+}
+
+/// CSV import / export routes. Mount with:
 ///   `.nest("/api/catalogue", catalogue::csv_routes())`
 pub fn csv_routes() -> Router<AppState> {
     Router::new()

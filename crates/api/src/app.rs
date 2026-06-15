@@ -30,7 +30,7 @@ pub fn create_router() -> Router<AppState> {
 
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .nest("/api", workspace::routes().merge(fraud::stolen::routes()))
+        .nest("/api", workspace::routes().merge(fraud::stolen::routes()).merge(catalogue::routes()))
         .nest("/api", fraud::routes::routes())
         .nest("/api", catalogue::routes::router())
         .nest("/api", crate::grading::routes::router())

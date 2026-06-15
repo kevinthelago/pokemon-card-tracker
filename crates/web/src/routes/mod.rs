@@ -1,5 +1,6 @@
 pub mod catalogue;
 pub mod import;
+pub mod inventory;
 pub mod reconcile;
 pub mod risk;
 pub mod settings;
