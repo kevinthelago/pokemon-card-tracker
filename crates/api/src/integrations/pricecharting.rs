@@ -80,7 +80,8 @@ impl ProductResponse {
 
     /// Best available graded price: grade-specific first, then generic graded.
     pub fn best_graded_price(&self, grade: u8) -> Option<Decimal> {
-        self.grade_price(grade).or_else(|| self.graded_price_decimal())
+        self.grade_price(grade)
+            .or_else(|| self.graded_price_decimal())
     }
 }
 
@@ -127,7 +128,10 @@ impl PriceChartingClient {
     /// Search for products by name query. Returns all results (caller filters).
     pub async fn search(&self, query: &str) -> Result<Vec<ProductResult>> {
         let encoded = urlencoding::encode(query);
-        let url = format!("{}/products?q={}&api_key={}", BASE_URL, encoded, self.api_key);
+        let url = format!(
+            "{}/products?q={}&api_key={}",
+            BASE_URL, encoded, self.api_key
+        );
         let resp: ProductSearchResponse = self
             .client
             .get(&url)
@@ -198,7 +202,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn mock_product(loose_cents: Option<u64>, graded_cents: Option<u64>, grade_9_cents: Option<u64>) -> ProductResponse {
+    fn mock_product(
+        loose_cents: Option<u64>,
+        graded_cents: Option<u64>,
+        grade_9_cents: Option<u64>,
+    ) -> ProductResponse {
         let mut extra = HashMap::new();
         if let Some(c) = grade_9_cents {
             extra.insert("grade-9-price".into(), json!(c));
@@ -216,7 +224,10 @@ mod tests {
     #[test]
     fn loose_price_converts_cents_to_decimal() {
         let p = mock_product(Some(1050), None, None);
-        assert_eq!(p.loose_price_decimal(), Some(Decimal::from_str("10.50").unwrap()));
+        assert_eq!(
+            p.loose_price_decimal(),
+            Some(Decimal::from_str("10.50").unwrap())
+        );
     }
 
     #[test]
@@ -229,13 +240,19 @@ mod tests {
     fn best_graded_price_falls_back_to_generic() {
         let p = mock_product(None, Some(15000), None);
         // No grade-9-price, should return generic graded
-        assert_eq!(p.best_graded_price(9), Some(Decimal::from_str("150.00").unwrap()));
+        assert_eq!(
+            p.best_graded_price(9),
+            Some(Decimal::from_str("150.00").unwrap())
+        );
     }
 
     #[test]
     fn best_graded_price_prefers_specific_grade() {
         let p = mock_product(None, Some(15000), Some(25000));
-        assert_eq!(p.best_graded_price(9), Some(Decimal::from_str("250.00").unwrap()));
+        assert_eq!(
+            p.best_graded_price(9),
+            Some(Decimal::from_str("250.00").unwrap())
+        );
     }
 
     #[test]

@@ -9,7 +9,10 @@ pub async fn dispatch_new_flag(state: &AppState, flag: &RiskFlag, deep_link: &st
     let members = match fetch_member_emails(&state.pool, flag.workspace_id).await {
         Ok(v) => v,
         Err(e) => {
-            tracing::error!("notify: failed to fetch members for {}: {e}", flag.workspace_id);
+            tracing::error!(
+                "notify: failed to fetch members for {}: {e}",
+                flag.workspace_id
+            );
             return;
         }
     };
@@ -21,7 +24,10 @@ pub async fn dispatch_new_flag(state: &AppState, flag: &RiskFlag, deep_link: &st
             flag.workspace_id,
             *user_id,
             &flag.title,
-            &format!("A new {:?} risk flag (severity: {:?}) requires triage.", flag.kind, flag.severity),
+            &format!(
+                "A new {:?} risk flag (severity: {:?}) requires triage.",
+                flag.kind, flag.severity
+            ),
             deep_link,
         )
         .await

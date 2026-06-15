@@ -127,14 +127,11 @@ impl PokemonTcgClient {
         self.limiter.until_ready().await;
 
         let page_size = page_size.min(MAX_PAGE_SIZE);
-        let mut req = self
-            .client
-            .get(format!("{}/cards", self.base_url))
-            .query(&[
-                ("q", q.to_string()),
-                ("page", page.to_string()),
-                ("pageSize", page_size.to_string()),
-            ]);
+        let mut req = self.client.get(format!("{}/cards", self.base_url)).query(&[
+            ("q", q.to_string()),
+            ("page", page.to_string()),
+            ("pageSize", page_size.to_string()),
+        ]);
 
         if let Some(key) = &self.api_key {
             req = req.header("X-Api-Key", key);
@@ -154,9 +151,7 @@ impl PokemonTcgClient {
     pub async fn get_card(&self, id: &str) -> Result<Option<TcgCard>, TcgApiError> {
         self.limiter.until_ready().await;
 
-        let mut req = self
-            .client
-            .get(format!("{}/cards/{}", self.base_url, id));
+        let mut req = self.client.get(format!("{}/cards/{}", self.base_url, id));
 
         if let Some(key) = &self.api_key {
             req = req.header("X-Api-Key", key);
@@ -198,7 +193,9 @@ mod tests {
         let server = MockServer::start();
 
         server.mock(|when, then| {
-            when.method(GET).path("/cards").query_param("q", "name:\"Pikachu*\"");
+            when.method(GET)
+                .path("/cards")
+                .query_param("q", "name:\"Pikachu*\"");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(fixture("pokemontcg_search.json"));

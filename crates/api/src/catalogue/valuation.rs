@@ -212,7 +212,11 @@ impl ValuationService {
         // Only PSA has reliable grade-specific pricing on PriceCharting.
         if grader.to_ascii_uppercase() == "PSA" {
             let grade_int = grade.round().clamp(1.0, 10.0) as u8;
-            match self.pc.graded_price(&printing.name, &printing.set_code, grade_int).await {
+            match self
+                .pc
+                .graded_price(&printing.name, &printing.set_code, grade_int)
+                .await
+            {
                 Ok(Some(price)) => {
                     return Ok((
                         ValuationStatus::Current(ResolvedPrice {
@@ -355,7 +359,11 @@ impl ValuationService {
     }
 
     /// Historical snapshots for a single printing, newest first.
-    pub async fn history(&self, printing_id: &str, limit: i64) -> Result<Vec<ValuationSnapshotRow>> {
+    pub async fn history(
+        &self,
+        printing_id: &str,
+        limit: i64,
+    ) -> Result<Vec<ValuationSnapshotRow>> {
         sqlx::query_as::<_, ValuationSnapshotRow>(
             "SELECT id, printing_id, price, currency, source, captured_at
              FROM valuation_snapshots
@@ -441,8 +449,7 @@ impl ValuationService {
     ///
     /// Priority: holofoil > 1st-edition-holofoil > normal > reverse-holo.
     fn extract_tcg_market_price(&self, printing: &PrintingRow) -> Option<Decimal> {
-        let blob: TcgPricesBlob =
-            serde_json::from_value(printing.tcg_prices_json.clone()?).ok()?;
+        let blob: TcgPricesBlob = serde_json::from_value(printing.tcg_prices_json.clone()?).ok()?;
 
         let market_f64 = blob
             .holofoil
@@ -526,7 +533,10 @@ mod tests {
             "holofoil": { "low": 1.00, "mid": 2.50, "market": 2.15 },
             "normal":   { "low": 0.50, "mid": 0.80, "market": 0.75 }
         }));
-        assert_eq!(extract(&printing), Some(Decimal::try_from(2.15_f64).unwrap()));
+        assert_eq!(
+            extract(&printing),
+            Some(Decimal::try_from(2.15_f64).unwrap())
+        );
     }
 
     #[test]
@@ -535,7 +545,10 @@ mod tests {
         let printing = printing_with_tcg_prices(json!({
             "normal": { "market": 0.75 }
         }));
-        assert_eq!(extract(&printing), Some(Decimal::try_from(0.75_f64).unwrap()));
+        assert_eq!(
+            extract(&printing),
+            Some(Decimal::try_from(0.75_f64).unwrap())
+        );
     }
 
     #[test]

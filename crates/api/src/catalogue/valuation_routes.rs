@@ -43,8 +43,11 @@ fn workspace_from_headers_or_query(
     workspace_id_param: Option<Uuid>,
 ) -> Result<Uuid, AppError> {
     if let Some(val) = headers.get("X-Workspace-Id") {
-        let s = val.to_str().map_err(|_| AppError::BadRequest("invalid X-Workspace-Id header".into()))?;
-        return Uuid::parse_str(s).map_err(|_| AppError::BadRequest("X-Workspace-Id is not a valid UUID".into()));
+        let s = val
+            .to_str()
+            .map_err(|_| AppError::BadRequest("invalid X-Workspace-Id header".into()))?;
+        return Uuid::parse_str(s)
+            .map_err(|_| AppError::BadRequest("X-Workspace-Id is not a valid UUID".into()));
     }
     workspace_id_param.ok_or_else(|| AppError::BadRequest("workspace_id is required".into()))
 }
@@ -177,7 +180,10 @@ async fn get_valuations(
         })
         .collect();
 
-    Ok(Json(GetValuationsResponse { data, total_usd: total }))
+    Ok(Json(GetValuationsResponse {
+        data,
+        total_usd: total,
+    }))
 }
 
 async fn trigger_refresh(
@@ -250,7 +256,10 @@ mod tests {
     fn workspace_from_query_param() {
         let id = Uuid::new_v4();
         let headers = HeaderMap::new();
-        assert_eq!(workspace_from_headers_or_query(&headers, Some(id)).unwrap(), id);
+        assert_eq!(
+            workspace_from_headers_or_query(&headers, Some(id)).unwrap(),
+            id
+        );
     }
 
     #[test]

@@ -137,7 +137,10 @@ pub async fn fetch_reconcile_report(
     workspace_id: Uuid,
     report_id: Uuid,
 ) -> Result<ReportDetailDto, String> {
-    get_json(&format!("/workspaces/{workspace_id}/pos/reconciliation/{report_id}")).await
+    get_json(&format!(
+        "/workspaces/{workspace_id}/pos/reconciliation/{report_id}"
+    ))
+    .await
 }
 
 pub async fn trigger_sync(
@@ -192,13 +195,20 @@ pub async fn create_mapping(
     }
     post_json(
         &format!("/workspaces/{workspace_id}/pos/mapping"),
-        &Body { connection_id, pos_sku, printing_id },
+        &Body {
+            connection_id,
+            pos_sku,
+            printing_id,
+        },
     )
     .await
 }
 
 pub async fn delete_mapping(workspace_id: Uuid, mapping_id: Uuid) -> Result<(), String> {
-    delete_req(&format!("/workspaces/{workspace_id}/pos/mapping/{mapping_id}")).await
+    delete_req(&format!(
+        "/workspaces/{workspace_id}/pos/mapping/{mapping_id}"
+    ))
+    .await
 }
 
 // ─── POS connect API ─────────────────────────────────────────────────────────
@@ -219,13 +229,19 @@ pub async fn start_pos_oauth(workspace_id: Uuid, provider: &str) -> Result<Strin
     struct Resp {
         authorization_url: String,
     }
-    let r: Resp =
-        post_json(&format!("/workspaces/{workspace_id}/pos/connect/{provider}"), &()).await?;
+    let r: Resp = post_json(
+        &format!("/workspaces/{workspace_id}/pos/connect/{provider}"),
+        &(),
+    )
+    .await?;
     Ok(r.authorization_url)
 }
 
 pub async fn disconnect_pos(workspace_id: Uuid, connection_id: Uuid) -> Result<(), String> {
-    delete_req(&format!("/workspaces/{workspace_id}/pos/connections/{connection_id}")).await
+    delete_req(&format!(
+        "/workspaces/{workspace_id}/pos/connections/{connection_id}"
+    ))
+    .await
 }
 
 // ─── Stolen-card API ─────────────────────────────────────────────────────────
@@ -252,7 +268,12 @@ pub async fn submit_stolen_report(
 
     let created: Created = post_json(
         "/stolen/reports",
-        &Body { grader, cert_number, evidence, notes },
+        &Body {
+            grader,
+            cert_number,
+            evidence,
+            notes,
+        },
     )
     .await?;
     Ok(created.id.to_string())
@@ -359,7 +380,11 @@ pub async fn fetch_risk_flags(
     if let Some(c) = after {
         qs.push_str(&format!("&after={c}"));
     }
-    let qs = if qs.is_empty() { String::new() } else { format!("?{}", &qs[1..]) };
+    let qs = if qs.is_empty() {
+        String::new()
+    } else {
+        format!("?{}", &qs[1..])
+    };
     get_json(&format!("/workspaces/{workspace_id}/risk/flags{qs}")).await
 }
 
@@ -385,12 +410,14 @@ pub async fn bulk_triage_flags(
     status: &str,
 ) -> Result<(), String> {
     let body = serde_json::json!({ "flag_ids": flag_ids, "status": status });
-    let resp = Request::post(&format!("{API_BASE}/workspaces/{workspace_id}/risk/flags/bulk"))
-        .json(&body)
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = Request::post(&format!(
+        "{API_BASE}/workspaces/{workspace_id}/risk/flags/bulk"
+    ))
+    .json(&body)
+    .map_err(|e| e.to_string())?
+    .send()
+    .await
+    .map_err(|e| e.to_string())?;
     if !resp.ok() {
         let text = resp.text().await.unwrap_or_default();
         return Err(format!("HTTP {}: {}", resp.status(), text));
@@ -422,7 +449,9 @@ pub async fn mark_notification_read(workspace_id: Uuid, notif_id: Uuid) -> Resul
 
 // ─── Inventory API ───────────────────────────────────────────────────────────
 
-use crate::routes::inventory::{BulkOp, InventoryFilter, InventoryItem, InventoryPage, PatchRequest};
+use crate::routes::inventory::{
+    BulkOp, InventoryFilter, InventoryItem, InventoryPage, PatchRequest,
+};
 
 pub async fn fetch_inventory(
     workspace_id: Uuid,
@@ -464,12 +493,14 @@ pub async fn patch_inventory_item(
     id: Uuid,
     req: &PatchRequest,
 ) -> Result<InventoryItem, String> {
-    let resp = Request::patch(&format!("{API_BASE}/workspaces/{workspace_id}/catalogue/items/{id}"))
-        .json(req)
-        .map_err(|e| e.to_string())?
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let resp = Request::patch(&format!(
+        "{API_BASE}/workspaces/{workspace_id}/catalogue/items/{id}"
+    ))
+    .json(req)
+    .map_err(|e| e.to_string())?
+    .send()
+    .await
+    .map_err(|e| e.to_string())?;
     if resp.status() == 409 {
         return Err("conflict".into());
     }
@@ -477,7 +508,9 @@ pub async fn patch_inventory_item(
         let text = resp.text().await.unwrap_or_default();
         return Err(format!("HTTP {}: {}", resp.status(), text));
     }
-    resp.json::<InventoryItem>().await.map_err(|e| e.to_string())
+    resp.json::<InventoryItem>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 pub async fn delete_inventory_item(workspace_id: Uuid, id: Uuid) -> Result<(), String> {
@@ -486,7 +519,9 @@ pub async fn delete_inventory_item(workspace_id: Uuid, id: Uuid) -> Result<(), S
 
 pub async fn bulk_inventory(workspace_id: Uuid, op: &BulkOp) -> Result<u64, String> {
     #[derive(serde::Deserialize)]
-    struct BulkResult { affected: u64 }
+    struct BulkResult {
+        affected: u64,
+    }
     let r: BulkResult = post_json(
         &format!("/workspaces/{workspace_id}/catalogue/items/bulk"),
         op,

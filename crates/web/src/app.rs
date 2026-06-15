@@ -30,14 +30,22 @@ use crate::routes::{
 #[component]
 fn ImportPage() -> impl IntoView {
     let params = use_params_map();
-    let wid = params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()));
+    let wid = params.with(|p| {
+        p.get("wid")
+            .as_deref()
+            .and_then(|s| Uuid::parse_str(s).ok())
+    });
     wid.map(|id| view! { <ImportWizard workspace_id=id /> })
 }
 
 #[component]
 fn ExportRoute() -> impl IntoView {
     let params = use_params_map();
-    let wid = params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()));
+    let wid = params.with(|p| {
+        p.get("wid")
+            .as_deref()
+            .and_then(|s| Uuid::parse_str(s).ok())
+    });
     wid.map(|id| view! { <ExportPage workspace_id=id /> })
 }
 

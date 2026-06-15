@@ -21,28 +21,15 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, QueryBuilder};
 use uuid::Uuid;
 
-use crate::{
-    app::AppState,
-    auth::AuthUser,
-    error::AppError,
-};
+use crate::{app::AppState, auth::AuthUser, error::AppError};
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route(
-            "/workspaces/:wid/catalogue/items",
-            get(list_items),
-        )
-        .route(
-            "/workspaces/:wid/catalogue/items/export",
-            get(export_items),
-        )
-        .route(
-            "/workspaces/:wid/catalogue/items/bulk",
-            post(bulk_items),
-        )
+        .route("/workspaces/:wid/catalogue/items", get(list_items))
+        .route("/workspaces/:wid/catalogue/items/export", get(export_items))
+        .route("/workspaces/:wid/catalogue/items/bulk", post(bulk_items))
         .route(
             "/workspaces/:wid/catalogue/items/:id",
             get(get_item).patch(patch_item).delete(delete_item),
@@ -111,9 +98,15 @@ pub struct InventoryRow {
 
 // ─── Query params ─────────────────────────────────────────────────────────────
 
-fn default_limit() -> i64 { 50 }
-fn default_sort() -> String { "date".into() }
-fn default_order() -> String { "desc".into() }
+fn default_limit() -> i64 {
+    50
+}
+fn default_sort() -> String {
+    "date".into()
+}
+fn default_order() -> String {
+    "desc".into()
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct InventoryListQuery {
@@ -183,13 +176,15 @@ async fn list_items(
         .await?;
 
     let next_cursor = if rows.len() as i64 == limit {
-        rows.last()
-            .map(|r| encode_cursor(r.created_at, r.id))
+        rows.last().map(|r| encode_cursor(r.created_at, r.id))
     } else {
         None
     };
 
-    Ok(Json(InventoryPage { items: rows, next_cursor }))
+    Ok(Json(InventoryPage {
+        items: rows,
+        next_cursor,
+    }))
 }
 
 fn build_list_query<'a>(
@@ -257,7 +252,9 @@ fn build_list_query<'a>(
     };
     let order_dir = if q.order == "asc" { "ASC" } else { "DESC" };
 
-    qb.push(format!(" ORDER BY {order_col} {order_dir}, id {order_dir} LIMIT "));
+    qb.push(format!(
+        " ORDER BY {order_col} {order_dir}, id {order_dir} LIMIT "
+    ));
     qb.push_bind(limit);
 
     qb
@@ -443,7 +440,9 @@ async fn patch_item(
 
     if let Some(server_ts) = raw_ts {
         if server_ts != req.version {
-            return Err(AppError::Conflict("item was modified — reload and retry".into()));
+            return Err(AppError::Conflict(
+                "item was modified — reload and retry".into(),
+            ));
         }
         // Apply update.
         sqlx::query(
@@ -481,7 +480,9 @@ async fn patch_item(
 
     if let Some(server_ts) = graded_ts {
         if server_ts != req.version {
-            return Err(AppError::Conflict("item was modified — reload and retry".into()));
+            return Err(AppError::Conflict(
+                "item was modified — reload and retry".into(),
+            ));
         }
         // Graded: condition, acquisition_cost, notes, current_value only (grade/identity read-only).
         sqlx::query(
@@ -521,12 +522,11 @@ async fn delete_item(
     require_member(&state.pool, wid, auth.id).await?;
 
     // Check if raw item is referenced by transaction_lines.
-    let referenced: Option<bool> = sqlx::query_scalar(
-        "SELECT true FROM transaction_lines WHERE item_id = $1 LIMIT 1",
-    )
-    .bind(id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let referenced: Option<bool> =
+        sqlx::query_scalar("SELECT true FROM transaction_lines WHERE item_id = $1 LIMIT 1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
 
     if referenced.is_some() {
         // Soft-delete: preserve history.
@@ -603,15 +603,19 @@ async fn bulk_items(
     require_member(&state.pool, wid, auth.id).await?;
 
     let affected = match req {
-        BulkRequest::Edit { ids, condition, acquisition_cost } => {
+        BulkRequest::Edit {
+            ids,
+            condition,
+            acquisition_cost,
+        } => {
             if ids.is_empty() || (condition.is_none() && acquisition_cost.is_none()) {
                 return Ok(Json(BulkResult { affected: 0 }));
             }
             let mut total = 0u64;
 
             let build_set = |qb: &mut QueryBuilder<sqlx::Postgres>,
-                              cond: &Option<String>,
-                              acq: Option<Decimal>| {
+                             cond: &Option<String>,
+                             acq: Option<Decimal>| {
                 let mut need_sep = false;
                 if let Some(c) = cond {
                     qb.push("condition = ");
@@ -619,7 +623,9 @@ async fn bulk_items(
                     need_sep = true;
                 }
                 if let Some(a) = acq {
-                    if need_sep { qb.push(", "); }
+                    if need_sep {
+                        qb.push(", ");
+                    }
                     qb.push("acquisition_cost = ");
                     qb.push_bind(a);
                 }
@@ -749,7 +755,9 @@ async fn export_items(
             r.grade.as_deref().unwrap_or(""),
             r.grader.as_deref().unwrap_or(""),
             r.cert_number.as_deref().unwrap_or(""),
-            r.acquisition_cost.map(|d| d.to_string()).unwrap_or_default(),
+            r.acquisition_cost
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
             r.current_value.map(|d| d.to_string()).unwrap_or_default(),
             r.has_risk_flag,
             r.created_at.to_rfc3339(),
@@ -815,12 +823,18 @@ mod tests {
         let wid = Uuid::new_v4();
         // Should not panic — just verify the query builder produces SQL.
         let sql = build_list_query(wid, &q, 50, None).sql().to_string();
-        assert!(sql.contains("risk_flags"), "risk_flagged filter missing from query");
+        assert!(
+            sql.contains("risk_flags"),
+            "risk_flagged filter missing from query"
+        );
     }
 
     #[test]
     fn build_list_query_kind_raw_excludes_graded() {
-        let q = InventoryListQuery { kind: Some("raw".into()), ..Default::default() };
+        let q = InventoryListQuery {
+            kind: Some("raw".into()),
+            ..Default::default()
+        };
         let wid = Uuid::new_v4();
         let sql = build_list_query(wid, &q, 50, None).sql().to_string();
         // graded branch should short-circuit with AND false
@@ -829,7 +843,10 @@ mod tests {
 
     #[test]
     fn build_list_query_kind_graded_excludes_raw() {
-        let q = InventoryListQuery { kind: Some("graded".into()), ..Default::default() };
+        let q = InventoryListQuery {
+            kind: Some("graded".into()),
+            ..Default::default()
+        };
         let wid = Uuid::new_v4();
         let sql = build_list_query(wid, &q, 50, None).sql().to_string();
         assert!(sql.contains("AND false"));

@@ -19,8 +19,8 @@ use crate::{
 };
 
 use super::flags::{
-    FlagKind, FlagSeverity, FlagStatus, KindCount, Notification, RiskFlag,
-    RiskSummary, SeverityCount, TargetType, TrendPoint,
+    FlagKind, FlagSeverity, FlagStatus, KindCount, Notification, RiskFlag, RiskSummary,
+    SeverityCount, TargetType, TrendPoint,
 };
 
 pub fn routes() -> Router<AppState> {
@@ -145,7 +145,10 @@ async fn list_flags(
     let effective_kind = if matches!(access.kind, WorkspaceKind::Collector) {
         match q.kind {
             Some(FlagKind::Scalper) => {
-                return Ok(Json(FlagsPage { items: vec![], next_cursor: None }));
+                return Ok(Json(FlagsPage {
+                    items: vec![],
+                    next_cursor: None,
+                }));
             }
             _ => q.kind,
         }
@@ -156,10 +159,7 @@ async fn list_flags(
     let per_page = q.per_page.clamp(1, 100);
 
     // Decode cursor → (created_at, id) for keyset pagination.
-    let cursor_pair: Option<(DateTime<Utc>, Uuid)> = q
-        .after
-        .as_deref()
-        .and_then(decode_cursor);
+    let cursor_pair: Option<(DateTime<Utc>, Uuid)> = q.after.as_deref().and_then(decode_cursor);
 
     // Build the query dynamically. Using runtime queries (no query! macro) so
     // this compiles without DATABASE_URL.
@@ -249,9 +249,7 @@ async fn get_flag(
     .ok_or(AppError::NotFound)?;
 
     // Collectors can't see scalper flags.
-    if matches!(access.kind, WorkspaceKind::Collector)
-        && matches!(flag.kind, FlagKind::Scalper)
-    {
+    if matches!(access.kind, WorkspaceKind::Collector) && matches!(flag.kind, FlagKind::Scalper) {
         return Err(AppError::NotFound);
     }
 
@@ -282,9 +280,7 @@ async fn triage_flag(
     .await?;
 
     // Scalper-dismissal tuning hook: emit a note for the detect-scalpers stream.
-    if matches!(body.status, TriageStatus::Dismissed)
-        && matches!(flag.kind, FlagKind::Scalper)
-    {
+    if matches!(body.status, TriageStatus::Dismissed) && matches!(flag.kind, FlagKind::Scalper) {
         tracing::info!(
             flag_id = %fid,
             workspace_id = %wid,
@@ -309,7 +305,9 @@ async fn bulk_triage(
         return Err(AppError::BadRequest("flag_ids must not be empty".into()));
     }
     if body.flag_ids.len() > 100 {
-        return Err(AppError::BadRequest("at most 100 flags per bulk operation".into()));
+        return Err(AppError::BadRequest(
+            "at most 100 flags per bulk operation".into(),
+        ));
     }
 
     for &fid in &body.flag_ids {
@@ -325,8 +323,7 @@ async fn bulk_triage(
         )
         .await?;
 
-        if matches!(body.status, TriageStatus::Dismissed)
-            && matches!(flag.kind, FlagKind::Scalper)
+        if matches!(body.status, TriageStatus::Dismissed) && matches!(flag.kind, FlagKind::Scalper)
         {
             tracing::info!(
                 flag_id = %fid,
@@ -410,7 +407,11 @@ async fn get_summary(
     .fetch_all(&state.pool)
     .await?;
 
-    Ok(Json(RiskSummary { counts_by_kind, counts_by_severity, trend }))
+    Ok(Json(RiskSummary {
+        counts_by_kind,
+        counts_by_severity,
+        trend,
+    }))
 }
 
 /// GET /api/workspaces/:wid/notifications
@@ -631,6 +632,9 @@ mod tests {
     #[test]
     fn triage_status_action_names() {
         assert_eq!(triage_action_name(TriageStatus::Reviewed), "flag_reviewed");
-        assert_eq!(triage_action_name(TriageStatus::Dismissed), "flag_dismissed");
+        assert_eq!(
+            triage_action_name(TriageStatus::Dismissed),
+            "flag_dismissed"
+        );
     }
 }

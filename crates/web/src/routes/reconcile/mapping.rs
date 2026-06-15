@@ -2,8 +2,8 @@ use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 use uuid::Uuid;
 
-use crate::api;
 use super::{MappingDto, MappingQueueDto, UnmappedSkuDto};
+use crate::api;
 
 // ─── UnmappedSkuRow component ─────────────────────────────────────────────────
 
@@ -14,7 +14,10 @@ fn UnmappedSkuRow(
     on_mapped: Callback<()>,
 ) -> impl IntoView {
     let pos_sku = sku.pos_sku.clone();
-    let product_name = sku.pos_product_name.clone().unwrap_or_else(|| "\u{2014}".into());
+    let product_name = sku
+        .pos_product_name
+        .clone()
+        .unwrap_or_else(|| "\u{2014}".into());
     let last_seen = sku.last_seen_at.clone();
     let connection_id = sku.connection_id;
 
@@ -40,7 +43,11 @@ fn UnmappedSkuRow(
                     set_success_msg.set(Some(format!(
                         "\u{2713} Mapped \u{2014} {} historical sale{} reconciled",
                         result.backfilled_lines,
-                        if result.backfilled_lines == 1 { "" } else { "s" }
+                        if result.backfilled_lines == 1 {
+                            ""
+                        } else {
+                            "s"
+                        }
                     )));
                     on_mapped.run(());
                 }

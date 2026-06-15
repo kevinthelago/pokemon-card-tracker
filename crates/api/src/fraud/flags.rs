@@ -11,7 +11,9 @@ pub enum FlagKind {
     Counterfeit,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, sqlx::Type,
+)]
 #[sqlx(type_name = "flag_severity", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum FlagSeverity {

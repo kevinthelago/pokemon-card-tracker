@@ -1,0 +1,31 @@
+# Multi-stage Dockerfile for the CardGuard API server.
+# TODO (H2): fill in staging/prod config, secrets injection, and health check.
+
+FROM rust:1.87-slim AS builder
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# Cache dependency builds
+COPY Cargo.toml Cargo.lock ./
+COPY crates/domain/Cargo.toml crates/domain/
+COPY crates/api/Cargo.toml crates/api/
+COPY crates/web/Cargo.toml crates/web/
+RUN mkdir -p crates/domain/src crates/api/src crates/web/src \
+    && echo "fn main() {}" > crates/api/src/main.rs \
+    && echo "" > crates/domain/src/lib.rs \
+    && echo "" > crates/web/src/lib.rs \
+    && cargo build --release -p api 2>/dev/null || true
+
+# Build the real binary
+COPY . .
+RUN cargo build --release -p api
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/api /usr/local/bin/api
+COPY --from=builder /app/crates/api/migrations /app/migrations
+
+EXPOSE 3000
+CMD ["/usr/local/bin/api"]

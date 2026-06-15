@@ -22,9 +22,18 @@ use crate::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/workspaces/:wid/pos/connect/:provider", post(start_connect))
-        .route("/api/workspaces/:wid/pos/connections", get(list_connections))
-        .route("/api/workspaces/:wid/pos/connections/:id", delete(disconnect))
+        .route(
+            "/api/workspaces/:wid/pos/connect/:provider",
+            post(start_connect),
+        )
+        .route(
+            "/api/workspaces/:wid/pos/connections",
+            get(list_connections),
+        )
+        .route(
+            "/api/workspaces/:wid/pos/connections/:id",
+            delete(disconnect),
+        )
         .route("/pos/oauth/callback", get(oauth_callback))
         .route("/webhooks/pos/:provider", post(webhook_receiver))
 }
@@ -59,10 +68,17 @@ async fn start_connect(
     let oauth = adapter.oauth_start(workspace_id, &redirect_uri);
 
     let repo = ConnectionRepo::new(state.pool.clone(), state.encryption_key.clone());
-    repo.create_pending(workspace_id, provider.as_str(), &oauth.state, &oauth.pkce_verifier)
-        .await?;
+    repo.create_pending(
+        workspace_id,
+        provider.as_str(),
+        &oauth.state,
+        &oauth.pkce_verifier,
+    )
+    .await?;
 
-    Ok(Json(StartConnectResponse { authorization_url: oauth.authorization_url }))
+    Ok(Json(StartConnectResponse {
+        authorization_url: oauth.authorization_url,
+    }))
 }
 
 async fn oauth_callback(
@@ -113,7 +129,10 @@ async fn process_oauth_callback(
     let redirect_uri = oauth_redirect_uri(&state.base_url, &conn.provider);
     let pkce_verifier = conn.pkce_verifier.as_deref().unwrap_or("");
 
-    let tokens = match adapter.oauth_exchange(&code, pkce_verifier, &redirect_uri).await {
+    let tokens = match adapter
+        .oauth_exchange(&code, pkce_verifier, &redirect_uri)
+        .await
+    {
         Ok(t) => t,
         Err(e) => {
             let _ = repo.set_error(conn.id, &e.to_string()).await;
@@ -138,7 +157,8 @@ async fn process_oauth_callback(
         )
         .await?;
     } else {
-        repo.activate(conn.id, &tokens, webhook_id, uses_polling).await?;
+        repo.activate(conn.id, &tokens, webhook_id, uses_polling)
+            .await?;
     }
 
     enqueue_initial_sync(InitialSyncJob {
@@ -200,17 +220,13 @@ async fn webhook_receiver(
     };
 
     let signing_key = match provider {
-        Provider::Square => {
-            std::env::var("SQUARE_WEBHOOK_SIGNATURE_KEY").unwrap_or_default()
-        }
+        Provider::Square => std::env::var("SQUARE_WEBHOOK_SIGNATURE_KEY").unwrap_or_default(),
         Provider::Shopify => std::env::var("SHOPIFY_API_SECRET").unwrap_or_default(),
         Provider::Clover => String::new(),
     };
 
     let adapter = get_adapter(provider);
-    if !signing_key.is_empty()
-        && !adapter.verify_webhook_signature(&headers, &body, &signing_key)
-    {
+    if !signing_key.is_empty() && !adapter.verify_webhook_signature(&headers, &body, &signing_key) {
         return (StatusCode::UNAUTHORIZED, "Invalid signature").into_response();
     }
 

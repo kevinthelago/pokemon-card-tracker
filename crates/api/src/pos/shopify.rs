@@ -21,7 +21,12 @@ pub struct ShopifyAdapter {
 
 impl ShopifyAdapter {
     pub fn new(api_key: String, api_secret: String, shop_domain: String) -> Self {
-        Self { api_key, api_secret, shop_domain, http: reqwest::Client::new() }
+        Self {
+            api_key,
+            api_secret,
+            shop_domain,
+            http: reqwest::Client::new(),
+        }
     }
 
     fn api_url(&self, path: &str) -> String {
@@ -264,11 +269,19 @@ impl PosAdapter for ShopifyAdapter {
                             .and_then(|p| p.parse::<f64>().ok())
                             .map(|p| (p * 100.0) as i64)
                             .unwrap_or(0);
-                        Some(AdapterSaleLine { sku, quantity, price_cents })
+                        Some(AdapterSaleLine {
+                            sku,
+                            quantity,
+                            price_cents,
+                        })
                     })
                     .collect();
 
-                AdapterSale { external_id: order.id.to_string(), occurred_at, lines }
+                AdapterSale {
+                    external_id: order.id.to_string(),
+                    occurred_at,
+                    lines,
+                }
             })
             .collect();
 
@@ -312,7 +325,9 @@ impl PosAdapter for ShopifyAdapter {
 
     async fn refresh_token(&self, _refresh_token: &str) -> Result<TokenSet, AppError> {
         // Shopify access tokens are long-lived and don't support programmatic refresh.
-        Err(AppError::Other(anyhow::anyhow!("Shopify tokens do not support refresh")))
+        Err(AppError::Other(anyhow::anyhow!(
+            "Shopify tokens do not support refresh"
+        )))
     }
 
     async fn revoke_token(&self, _access_token: &str) -> Result<(), AppError> {

@@ -61,9 +61,7 @@ pub fn ImportWizard(workspace_id: Uuid) -> impl IntoView {
         set_is_uploading.set(true);
 
         spawn_local(async move {
-            let request = match gloo_net::http::Request::post("/api/catalogue/import")
-                .body(fd)
-            {
+            let request = match gloo_net::http::Request::post("/api/catalogue/import").body(fd) {
                 Ok(r) => r,
                 Err(e) => {
                     set_is_uploading.set(false);

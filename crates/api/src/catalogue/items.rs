@@ -164,8 +164,8 @@ impl ItemsService {
         &self,
         req: &AddRawItemRequest,
     ) -> Result<InventoryItem, AppError> {
-        let photos = serde_json::to_value(&req.photos)
-            .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+        let photos =
+            serde_json::to_value(&req.photos).map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
 
         let row = sqlx::query_as::<_, InventoryItemRow>(
             "INSERT INTO inventory_items (
@@ -228,8 +228,8 @@ impl ItemsService {
             )));
         }
 
-        let photos = serde_json::to_value(&req.photos)
-            .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+        let photos =
+            serde_json::to_value(&req.photos).map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
 
         let row = sqlx::query_as::<_, CardInstanceRow>(
             "INSERT INTO card_instances (

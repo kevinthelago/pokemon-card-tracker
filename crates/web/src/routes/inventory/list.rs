@@ -50,7 +50,11 @@ impl Density {
 pub fn InventoryListPage() -> impl IntoView {
     let params = use_params_map();
     let workspace_id = move || {
-        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
     };
 
     let (filter, set_filter) = signal(InventoryFilter::new());
@@ -135,7 +139,11 @@ pub fn InventoryListPage() -> impl IntoView {
 
     let toggle_select = move |id: Uuid| {
         set_selected.update(|s| {
-            if s.contains(&id) { s.remove(&id); } else { s.insert(id); }
+            if s.contains(&id) {
+                s.remove(&id);
+            } else {
+                s.insert(id);
+            }
         });
     };
 

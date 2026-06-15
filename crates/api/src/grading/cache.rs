@@ -102,10 +102,25 @@ pub async fn store_result(
     outcome: &VerifyOutcome,
 ) -> Result<Uuid, AppError> {
     let (grader, cert_number) = match outcome {
-        VerifyOutcome::Verified { grader, cert_number, .. } => (grader, cert_number),
-        VerifyOutcome::Mismatch { grader, cert_number, .. } => (grader, cert_number),
-        VerifyOutcome::NotFound { grader, cert_number } => (grader, cert_number),
-        VerifyOutcome::Unavailable { grader, cert_number, .. } => (grader, cert_number),
+        VerifyOutcome::Verified {
+            grader,
+            cert_number,
+            ..
+        } => (grader, cert_number),
+        VerifyOutcome::Mismatch {
+            grader,
+            cert_number,
+            ..
+        } => (grader, cert_number),
+        VerifyOutcome::NotFound {
+            grader,
+            cert_number,
+        } => (grader, cert_number),
+        VerifyOutcome::Unavailable {
+            grader,
+            cert_number,
+            ..
+        } => (grader, cert_number),
     };
 
     let id: Uuid = sqlx::query_scalar(

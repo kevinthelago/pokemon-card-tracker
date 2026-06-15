@@ -116,7 +116,10 @@ impl VerifyResponse {
                 unavailable_reason: None,
                 cached,
             },
-            VerifyOutcome::NotFound { grader, cert_number } => Self {
+            VerifyOutcome::NotFound {
+                grader,
+                cert_number,
+            } => Self {
                 status: "not_found",
                 grader: grader.clone(),
                 cert_number: cert_number.clone(),
@@ -223,13 +226,12 @@ async fn verify_instance(
     validate_cert_number(&body.cert_number)?;
 
     // Load the instance to get the workspace context for flag creation.
-    let workspace_id: Option<Uuid> = sqlx::query_scalar(
-        "SELECT workspace_id FROM card_instances WHERE id = $1",
-    )
-    .bind(instance_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(AppError::Sqlx)?;
+    let workspace_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT workspace_id FROM card_instances WHERE id = $1")
+            .bind(instance_id)
+            .fetch_optional(&state.pool)
+            .await
+            .map_err(AppError::Sqlx)?;
 
     if workspace_id.is_none() {
         return Err(AppError::NotFound);

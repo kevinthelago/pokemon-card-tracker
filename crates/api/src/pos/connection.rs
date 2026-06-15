@@ -140,10 +140,7 @@ impl ConnectionRepo {
         .map_err(AppError::from)
     }
 
-    pub async fn list_active(
-        &self,
-        workspace_id: Uuid,
-    ) -> Result<Vec<PosConnectionRow>, AppError> {
+    pub async fn list_active(&self, workspace_id: Uuid) -> Result<Vec<PosConnectionRow>, AppError> {
         sqlx::query_as(
             r#"
             SELECT * FROM pos_connections
@@ -336,9 +333,10 @@ impl ConnectionRepo {
     }
 
     pub fn decrypt_access_token(&self, conn: &PosConnectionRow) -> Result<String, AppError> {
-        let data = conn.encrypted_access_token.as_ref().ok_or_else(|| {
-            AppError::Other(anyhow::anyhow!("No access token on connection"))
-        })?;
+        let data = conn
+            .encrypted_access_token
+            .as_ref()
+            .ok_or_else(|| AppError::Other(anyhow::anyhow!("No access token on connection")))?;
         decrypt_token(&self.key, data)
     }
 

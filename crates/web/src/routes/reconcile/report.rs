@@ -2,8 +2,8 @@ use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
 use uuid::Uuid;
 
-use crate::api;
 use super::{DiscrepancyDto, ReportDetailDto};
+use crate::api;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,7 +71,9 @@ fn DiscrepancyRow(
         let disc_id = d.id;
         let on_resolved = on_resolved.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            match api::resolve_discrepancy(workspace_id, report_id, disc_id, resolution, notes_opt).await {
+            match api::resolve_discrepancy(workspace_id, report_id, disc_id, resolution, notes_opt)
+                .await
+            {
                 Ok(updated) => {
                     set_current.set(updated.clone());
                     on_resolved.run(updated);

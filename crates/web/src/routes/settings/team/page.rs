@@ -17,7 +17,11 @@ pub fn TeamPage() -> impl IntoView {
     let params = use_params_map();
 
     let workspace_id = move || {
-        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
     };
 
     // Bump to force a refetch after any mutation.
@@ -67,11 +71,7 @@ pub fn TeamPage() -> impl IntoView {
 }
 
 #[component]
-fn TeamContent(
-    workspace_id: Uuid,
-    data: TeamResponse,
-    on_change: Callback<()>,
-) -> impl IntoView {
+fn TeamContent(workspace_id: Uuid, data: TeamResponse, on_change: Callback<()>) -> impl IntoView {
     view! {
         <section class="team-section">
             <h2 class="team-section__heading">"Members"</h2>

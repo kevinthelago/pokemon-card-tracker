@@ -23,8 +23,7 @@ pub type OnScanCallback = Callback<(String, String), ()>;
 pub fn CertScanner(
     /// Callback invoked with (grader, cert_number) on successful decode.
     on_scan: OnScanCallback,
-    #[prop(default = false)]
-    disabled: bool,
+    #[prop(default = false)] disabled: bool,
 ) -> impl IntoView {
     let (manual_grader, set_manual_grader) = signal("PSA".to_string());
     let (manual_cert, set_manual_cert) = signal(String::new());
@@ -185,9 +184,7 @@ async fn scan_from_camera() -> Result<(String, String), String> {
     let stream = web_sys::MediaStream::from(stream_value);
 
     // Create a video element and play the stream.
-    let document = window
-        .document()
-        .ok_or("no document")?;
+    let document = window.document().ok_or("no document")?;
     let video = document
         .create_element("video")
         .map_err(|_| "failed to create video")?;
@@ -196,13 +193,11 @@ async fn scan_from_camera() -> Result<(String, String), String> {
     let _ = video.play().map_err(|_| "failed to play video");
 
     // Wait a moment for the camera to stabilize.
-    let _ = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::new(
-        &mut |resolve, _| {
-            window
-                .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 800)
-                .ok();
-        },
-    ))
+    let _ = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::new(&mut |resolve, _| {
+        window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 800)
+            .ok();
+    }))
     .await;
 
     // Capture a frame via canvas.

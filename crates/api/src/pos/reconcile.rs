@@ -11,10 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    app::AppState,
-    error::AppError,
-    models::connection::PosConnection,
-    pos::mapping::MappingService,
+    app::AppState, error::AppError, models::connection::PosConnection, pos::mapping::MappingService,
 };
 
 // ─── POS provider abstraction (contract for connect-pos stream) ───────────────
@@ -166,7 +163,14 @@ impl ReconciliationService {
 
         // Diff catalogue vs POS when the connection pulls from POS.
         let disc_count = if connection.pulls_from_pos() {
-            match Self::diff_and_write_discrepancies(pool, &connection, report.id, provider.as_ref()).await {
+            match Self::diff_and_write_discrepancies(
+                pool,
+                &connection,
+                report.id,
+                provider.as_ref(),
+            )
+            .await
+            {
                 Ok(n) => n,
                 Err(e) => {
                     Self::set_status(pool, report.id, "failed", Some(&e.to_string())).await?;
@@ -180,7 +184,11 @@ impl ReconciliationService {
         // Push catalogue quantities back to POS when the connection allows it.
         if connection.pushes_to_pos() {
             if let Err(e) = Self::push_to_pos(pool, &connection, provider.as_ref()).await {
-                tracing::warn!("Non-fatal: POS push failed for connection={}: {}", connection_id, e);
+                tracing::warn!(
+                    "Non-fatal: POS push failed for connection={}: {}",
+                    connection_id,
+                    e
+                );
             }
         }
 
@@ -245,7 +253,11 @@ impl ReconciliationService {
             }
 
             // Refunds and returns reverse the quantity direction.
-            let qty_sign: i32 = if sale.transaction_type == "sale" { -1 } else { 1 };
+            let qty_sign: i32 = if sale.transaction_type == "sale" {
+                -1
+            } else {
+                1
+            };
 
             let txn_id: Uuid = sqlx::query_scalar(
                 "INSERT INTO transactions \
@@ -262,8 +274,7 @@ impl ReconciliationService {
             .await?;
 
             for line in &sale.lines {
-                let mapping =
-                    MappingService::find_mapping(pool, connection.id, &line.sku).await?;
+                let mapping = MappingService::find_mapping(pool, connection.id, &line.sku).await?;
                 let printing_id = mapping.as_ref().map(|m| m.printing_id);
                 let mapping_id = mapping.as_ref().map(|m| m.id);
 
@@ -332,8 +343,10 @@ impl ReconciliationService {
             .await?;
 
         let pos_items = provider.get_inventory(connection).await?;
-        let pos_map: std::collections::HashMap<String, i32> =
-            pos_items.iter().map(|i| (i.sku.clone(), i.quantity)).collect();
+        let pos_map: std::collections::HashMap<String, i32> = pos_items
+            .iter()
+            .map(|i| (i.sku.clone(), i.quantity))
+            .collect();
 
         #[derive(sqlx::FromRow)]
         struct MappedPrinting {
@@ -406,8 +419,13 @@ impl ReconciliationService {
         // POS items with no mapping → queue for manual mapping; not a discrepancy yet.
         for pos_item in &pos_items {
             if !mapped_skus.contains(&pos_item.sku) {
-                MappingService::queue_unmapped(pool, connection, &pos_item.sku, Some(&pos_item.name))
-                    .await?;
+                MappingService::queue_unmapped(
+                    pool,
+                    connection,
+                    &pos_item.sku,
+                    Some(&pos_item.name),
+                )
+                .await?;
             }
         }
 
@@ -495,9 +513,7 @@ impl ReconciliationService {
         .ok_or(AppError::NotFound)?;
 
         if !conn.is_active {
-            return Err(AppError::BadRequest(
-                "POS connection is inactive".into(),
-            ));
+            return Err(AppError::BadRequest("POS connection is inactive".into()));
         }
         Ok(conn)
     }
@@ -527,7 +543,10 @@ impl ReconciliationService {
 
     // ─── Public query helpers (used by HTTP handlers) ─────────────────────────
 
-    pub async fn get_report(pool: &PgPool, report_id: Uuid) -> Result<ReconciliationReport, AppError> {
+    pub async fn get_report(
+        pool: &PgPool,
+        report_id: Uuid,
+    ) -> Result<ReconciliationReport, AppError> {
         sqlx::query_as::<_, ReconciliationReport>(
             "SELECT * FROM reconciliation_reports WHERE id = $1",
         )
@@ -678,7 +697,10 @@ pub fn spawn_reconciliation_scheduler(
     })
 }
 
-async fn reconcile_all_active(pool: &PgPool, provider: Arc<dyn PosProvider>) -> Result<(), AppError> {
+async fn reconcile_all_active(
+    pool: &PgPool,
+    provider: Arc<dyn PosProvider>,
+) -> Result<(), AppError> {
     #[derive(sqlx::FromRow)]
     struct ActiveConn {
         workspace_id: Uuid,
@@ -692,8 +714,13 @@ async fn reconcile_all_active(pool: &PgPool, provider: Arc<dyn PosProvider>) -> 
     .await?;
 
     for c in conns {
-        if let Err(e) =
-            ReconciliationService::run_reconciliation(pool, c.workspace_id, c.id, Arc::clone(&provider)).await
+        if let Err(e) = ReconciliationService::run_reconciliation(
+            pool,
+            c.workspace_id,
+            c.id,
+            Arc::clone(&provider),
+        )
+        .await
         {
             tracing::error!(connection_id = %c.id, error = %e, "Scheduled reconciliation failed");
         }
@@ -728,8 +755,14 @@ pub struct ReportDetail {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/workspaces/:wid/pos/sync", post(handle_sync_now))
-        .route("/workspaces/:wid/pos/reconciliation", get(handle_list_reports))
-        .route("/workspaces/:wid/pos/reconciliation/:report_id", get(handle_get_report))
+        .route(
+            "/workspaces/:wid/pos/reconciliation",
+            get(handle_list_reports),
+        )
+        .route(
+            "/workspaces/:wid/pos/reconciliation/:report_id",
+            get(handle_get_report),
+        )
         .route(
             "/workspaces/:wid/pos/reconciliation/:report_id/discrepancies/:disc_id/resolve",
             post(handle_resolve_discrepancy),
@@ -757,8 +790,7 @@ async fn handle_list_reports(
     Path(wid): Path<Uuid>,
     Query(q): Query<ListReportsQuery>,
 ) -> Result<Json<Vec<ReconciliationReport>>, AppError> {
-    let reports =
-        ReconciliationService::list_reports(&state.pool, wid, q.connection_id).await?;
+    let reports = ReconciliationService::list_reports(&state.pool, wid, q.connection_id).await?;
     Ok(Json(reports))
 }
 
@@ -770,9 +802,11 @@ async fn handle_get_report(
     if report.workspace_id != wid {
         return Err(AppError::NotFound);
     }
-    let discrepancies =
-        ReconciliationService::get_discrepancies(&state.pool, report_id).await?;
-    Ok(Json(ReportDetail { report, discrepancies }))
+    let discrepancies = ReconciliationService::get_discrepancies(&state.pool, report_id).await?;
+    Ok(Json(ReportDetail {
+        report,
+        discrepancies,
+    }))
 }
 
 async fn handle_resolve_discrepancy(
@@ -811,12 +845,7 @@ impl PosProvider for NullPosProvider {
         Ok(vec![])
     }
 
-    async fn update_inventory(
-        &self,
-        _: &PosConnection,
-        _: &str,
-        _: i32,
-    ) -> Result<(), AppError> {
+    async fn update_inventory(&self, _: &PosConnection, _: &str, _: i32) -> Result<(), AppError> {
         Ok(())
     }
 }

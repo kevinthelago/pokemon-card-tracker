@@ -30,13 +30,16 @@ type ApiResult<T> = Result<T, AppError>;
 // ---------------------------------------------------------------------------
 
 fn condition_from_str(s: &str) -> Option<&'static str> {
-    match s.trim().to_uppercase().replace([' ', '-', '_'], "").as_str() {
+    match s
+        .trim()
+        .to_uppercase()
+        .replace([' ', '-', '_'], "")
+        .as_str()
+    {
         "M" | "MINT" => Some("mint"),
         "NM" | "NEARMINT" => Some("near_mint"),
         "LP" | "LIGHTLYPLAYED" | "EX" | "EXCELLENT" => Some("lightly_played"),
-        "MP" | "MODERATELYPLAYED" | "VG" | "VERYGOOD" | "GD" | "GOOD" => {
-            Some("moderately_played")
-        }
+        "MP" | "MODERATELYPLAYED" | "VG" | "VERYGOOD" | "GD" | "GOOD" => Some("moderately_played"),
         "HP" | "HEAVILYPLAYED" | "PO" | "POOR" | "FR" | "FAIR" => Some("heavily_played"),
         "D" | "DAMAGED" => Some("damaged"),
         _ => None,
@@ -197,18 +200,20 @@ pub async fn start_import(
                     .text()
                     .await
                     .map_err(|e| AppError::BadRequest(format!("workspace_id: {e}")))?;
-                workspace_id = Some(Uuid::parse_str(&text).map_err(|_| {
-                    AppError::BadRequest("invalid workspace_id UUID".to_owned())
-                })?);
+                workspace_id =
+                    Some(Uuid::parse_str(&text).map_err(|_| {
+                        AppError::BadRequest("invalid workspace_id UUID".to_owned())
+                    })?);
             }
             Some("column_map") => {
                 let text = field
                     .text()
                     .await
                     .map_err(|e| AppError::BadRequest(format!("column_map: {e}")))?;
-                provided_map = Some(serde_json::from_str(&text).map_err(|e| {
-                    AppError::BadRequest(format!("invalid column_map JSON: {e}"))
-                })?);
+                provided_map =
+                    Some(serde_json::from_str(&text).map_err(|e| {
+                        AppError::BadRequest(format!("invalid column_map JSON: {e}"))
+                    })?);
             }
             _ => {}
         }
@@ -220,7 +225,9 @@ pub async fn start_import(
         workspace_id.ok_or_else(|| AppError::BadRequest("missing workspace_id".to_owned()))?;
 
     if raw.is_empty() {
-        return Err(AppError::BadRequest("uploaded CSV file is empty".to_owned()));
+        return Err(AppError::BadRequest(
+            "uploaded CSV file is empty".to_owned(),
+        ));
     }
 
     let raw = strip_bom(&raw);
@@ -316,9 +323,7 @@ pub async fn confirm_import(
         )));
     }
 
-    body.column_map
-        .validate()
-        .map_err(AppError::BadRequest)?;
+    body.column_map.validate().map_err(AppError::BadRequest)?;
 
     let dir = export_dir();
     let upload_path = upload_file_path(&dir, job_id);
@@ -501,48 +506,47 @@ async fn run_import_job(
         };
 
         // Resolve printing identity (UUID) via set_id + number lookup
-        let printing_id: Option<Uuid> = if let (Some(ref sc), Some(ref nc)) =
-            (set_col.as_ref(), num_col.as_ref())
-        {
-            let set = get(sc);
-            let num = get(nc);
-            if set.is_empty() || num.is_empty() {
-                None
-            } else {
-                match sqlx::query(
-                    "SELECT id FROM printings WHERE set_id = $1 AND number = $2 LIMIT 1",
-                )
-                .bind(set)
-                .bind(num)
-                .fetch_optional(&state.pool)
-                .await
-                {
-                    Ok(Some(row)) => row.try_get::<Uuid, _>("id").ok(),
-                    Ok(None) => {
-                        errors.push(ErrorRow {
-                            row_number,
-                            raw_data: raw_data.clone(),
-                            field: "set_id/number".to_owned(),
-                            reason: format!("No printing found for set={set} number={num}"),
-                        });
-                        skipped += 1;
-                        continue;
-                    }
-                    Err(e) => {
-                        errors.push(ErrorRow {
-                            row_number,
-                            raw_data: raw_data.clone(),
-                            field: "set_id/number".to_owned(),
-                            reason: format!("DB lookup failed: {e}"),
-                        });
-                        skipped += 1;
-                        continue;
+        let printing_id: Option<Uuid> =
+            if let (Some(ref sc), Some(ref nc)) = (set_col.as_ref(), num_col.as_ref()) {
+                let set = get(sc);
+                let num = get(nc);
+                if set.is_empty() || num.is_empty() {
+                    None
+                } else {
+                    match sqlx::query(
+                        "SELECT id FROM printings WHERE set_id = $1 AND number = $2 LIMIT 1",
+                    )
+                    .bind(set)
+                    .bind(num)
+                    .fetch_optional(&state.pool)
+                    .await
+                    {
+                        Ok(Some(row)) => row.try_get::<Uuid, _>("id").ok(),
+                        Ok(None) => {
+                            errors.push(ErrorRow {
+                                row_number,
+                                raw_data: raw_data.clone(),
+                                field: "set_id/number".to_owned(),
+                                reason: format!("No printing found for set={set} number={num}"),
+                            });
+                            skipped += 1;
+                            continue;
+                        }
+                        Err(e) => {
+                            errors.push(ErrorRow {
+                                row_number,
+                                raw_data: raw_data.clone(),
+                                field: "set_id/number".to_owned(),
+                                reason: format!("DB lookup failed: {e}"),
+                            });
+                            skipped += 1;
+                            continue;
+                        }
                     }
                 }
-            }
-        } else {
-            None
-        };
+            } else {
+                None
+            };
 
         // Condition
         let cond_str = get(&condition_col);

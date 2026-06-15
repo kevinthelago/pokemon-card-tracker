@@ -12,9 +12,9 @@ pub struct EncryptionKey([u8; 32]);
 impl EncryptionKey {
     pub fn from_hex(hex_str: &str) -> anyhow::Result<Self> {
         let bytes = hex::decode(hex_str)?;
-        let arr: [u8; 32] = bytes
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars)"))?;
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| {
+            anyhow::anyhow!("ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars)")
+        })?;
         Ok(Self(arr))
     }
 

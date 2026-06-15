@@ -26,7 +26,11 @@ pub struct SquareAdapter {
 
 impl SquareAdapter {
     pub fn new(client_id: String, client_secret: String) -> Self {
-        Self { client_id, client_secret, http: reqwest::Client::new() }
+        Self {
+            client_id,
+            client_secret,
+            http: reqwest::Client::new(),
+        }
     }
 }
 
@@ -137,7 +141,11 @@ impl PosAdapter for SquareAdapter {
             state = state,
             challenge = challenge,
         );
-        OAuthStartResult { authorization_url: url, state, pkce_verifier: verifier }
+        OAuthStartResult {
+            authorization_url: url,
+            state,
+            pkce_verifier: verifier,
+        }
     }
 
     async fn oauth_exchange(
@@ -173,7 +181,10 @@ impl PosAdapter for SquareAdapter {
         if !status.is_success() {
             return Err(AppError::Other(anyhow::anyhow!(
                 "Square token exchange failed: {}",
-                payload.error_description.or(payload.error).unwrap_or_else(|| status.to_string())
+                payload
+                    .error_description
+                    .or(payload.error)
+                    .unwrap_or_else(|| status.to_string())
             )));
         }
 
@@ -229,7 +240,9 @@ impl PosAdapter for SquareAdapter {
             let Some(item) = obj.item_data else { continue };
             let name = item.name.unwrap_or_default();
             for variation in item.variations.unwrap_or_default() {
-                let Some(vdata) = variation.item_variation_data else { continue };
+                let Some(vdata) = variation.item_variation_data else {
+                    continue;
+                };
                 let sku = vdata.sku.unwrap_or_default();
                 if sku.is_empty() {
                     continue;
@@ -339,13 +352,20 @@ impl PosAdapter for SquareAdapter {
                             .as_deref()
                             .and_then(|q| q.parse::<f64>().ok())
                             .unwrap_or(1.0) as i64;
-                        let price_cents =
-                            item.base_price_money.and_then(|m| m.amount).unwrap_or(0);
-                        Some(AdapterSaleLine { sku, quantity, price_cents })
+                        let price_cents = item.base_price_money.and_then(|m| m.amount).unwrap_or(0);
+                        Some(AdapterSaleLine {
+                            sku,
+                            quantity,
+                            price_cents,
+                        })
                     })
                     .collect();
 
-                Some(AdapterSale { external_id: order.id, occurred_at, lines })
+                Some(AdapterSale {
+                    external_id: order.id,
+                    occurred_at,
+                    lines,
+                })
             })
             .collect();
 
@@ -420,12 +440,17 @@ impl PosAdapter for SquareAdapter {
         if !status.is_success() {
             return Err(AppError::Other(anyhow::anyhow!(
                 "Square token refresh failed: {}",
-                payload.error_description.or(payload.error).unwrap_or_else(|| status.to_string())
+                payload
+                    .error_description
+                    .or(payload.error)
+                    .unwrap_or_else(|| status.to_string())
             )));
         }
 
         let access_token = payload.access_token.ok_or_else(|| {
-            AppError::Other(anyhow::anyhow!("Square: no access_token in refresh response"))
+            AppError::Other(anyhow::anyhow!(
+                "Square: no access_token in refresh response"
+            ))
         })?;
 
         Ok(TokenSet {
@@ -493,7 +518,9 @@ mod tests {
         let result = adapter().oauth_start(Uuid::new_v4(), "https://example.com/callback");
         assert!(result.authorization_url.contains("connect.squareup.com"));
         assert!(result.authorization_url.contains("test-client-id"));
-        assert!(result.authorization_url.contains("code_challenge_method=S256"));
+        assert!(result
+            .authorization_url
+            .contains("code_challenge_method=S256"));
         assert!(!result.state.is_empty());
         assert!(!result.pkce_verifier.is_empty());
     }

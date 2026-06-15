@@ -43,7 +43,12 @@ pub fn PosSettingsPage() -> impl IntoView {
     let connections = LocalResource::new(move || {
         let wid = workspace_id();
         let _ = reload.get();
-        async move { api::fetch_pos_connections(wid).await.ok().unwrap_or_default() }
+        async move {
+            api::fetch_pos_connections(wid)
+                .await
+                .ok()
+                .unwrap_or_default()
+        }
     });
 
     let (action_error, set_action_error) = signal(Option::<String>::None);
@@ -250,7 +255,11 @@ fn ConnectionCard(
         "pending" => "Connecting…",
         _ => "Disconnected",
     };
-    let sync_label = if conn.uses_polling { "Polling" } else { "Webhook" };
+    let sync_label = if conn.uses_polling {
+        "Polling"
+    } else {
+        "Webhook"
+    };
     let last_sync = conn
         .last_synced_at
         .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string())

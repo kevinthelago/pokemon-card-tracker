@@ -97,14 +97,12 @@ pub async fn start_export(
     let job_id = Uuid::new_v4();
     let filters_json = serde_json::to_value(&req.filters).map_err(anyhow::Error::from)?;
 
-    sqlx::query(
-        "INSERT INTO export_jobs (id, workspace_id, filters) VALUES ($1, $2, $3)",
-    )
-    .bind(job_id)
-    .bind(req.workspace_id)
-    .bind(filters_json)
-    .execute(&state.pool)
-    .await?;
+    sqlx::query("INSERT INTO export_jobs (id, workspace_id, filters) VALUES ($1, $2, $3)")
+        .bind(job_id)
+        .bind(req.workspace_id)
+        .bind(filters_json)
+        .execute(&state.pool)
+        .await?;
 
     {
         let state2 = state.clone();
@@ -119,7 +117,10 @@ pub async fn start_export(
 
     Ok((
         StatusCode::ACCEPTED,
-        Json(StartExportResponse { job_id, status: "queued" }),
+        Json(StartExportResponse {
+            job_id,
+            status: "queued",
+        }),
     ))
 }
 
@@ -175,9 +176,7 @@ pub async fn download_export(
     let path: Option<String> = row.try_get("download_path").ok().flatten();
     let path = path.ok_or(AppError::NotFound)?;
 
-    let bytes = fs::read(&path)
-        .await
-        .map_err(anyhow::Error::from)?;
+    let bytes = fs::read(&path).await.map_err(anyhow::Error::from)?;
 
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, "text/csv; charset=utf-8")
@@ -272,17 +271,27 @@ async fn run_export_job(
 
         for row in query.fetch_all(&state.pool).await? {
             rows.push(ExportRow {
-                printing_id: row.try_get::<Option<String>, _>("printing_id").ok().flatten().unwrap_or_default(),
+                printing_id: row
+                    .try_get::<Option<String>, _>("printing_id")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
                 set_id: row.try_get("set_id").ok().flatten().unwrap_or_default(),
                 number: row.try_get("number").ok().flatten().unwrap_or_default(),
                 name: row.try_get("name").ok().flatten().unwrap_or_default(),
                 condition_or_grade: row.try_get("condition").ok().flatten().unwrap_or_default(),
                 quantity: row.try_get::<i32, _>("quantity").unwrap_or(0) as i64,
                 acquisition_cost_usd: cents_to_usd(
-                    row.try_get::<Option<i32>, _>("acquisition_cost_cents").ok().flatten().map(|c| c as i64),
+                    row.try_get::<Option<i32>, _>("acquisition_cost_cents")
+                        .ok()
+                        .flatten()
+                        .map(|c| c as i64),
                 ),
                 current_value_usd: cents_to_usd(
-                    row.try_get::<Option<i32>, _>("market_price_cents").ok().flatten().map(|c| c as i64),
+                    row.try_get::<Option<i32>, _>("market_price_cents")
+                        .ok()
+                        .flatten()
+                        .map(|c| c as i64),
                 ),
                 grader: String::new(),
                 cert_number: String::new(),
@@ -325,17 +334,31 @@ async fn run_export_job(
 
         for row in query.fetch_all(&state.pool).await? {
             rows.push(ExportRow {
-                printing_id: row.try_get::<Option<String>, _>("printing_id").ok().flatten().unwrap_or_default(),
+                printing_id: row
+                    .try_get::<Option<String>, _>("printing_id")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
                 set_id: row.try_get("set_id").ok().flatten().unwrap_or_default(),
                 number: row.try_get("number").ok().flatten().unwrap_or_default(),
                 name: row.try_get("name").ok().flatten().unwrap_or_default(),
-                condition_or_grade: row.try_get::<Option<String>, _>("grade").ok().flatten().unwrap_or_default(),
+                condition_or_grade: row
+                    .try_get::<Option<String>, _>("grade")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
                 quantity: 1,
                 acquisition_cost_usd: cents_to_usd(
-                    row.try_get::<Option<i32>, _>("acquisition_cost_cents").ok().flatten().map(|c| c as i64),
+                    row.try_get::<Option<i32>, _>("acquisition_cost_cents")
+                        .ok()
+                        .flatten()
+                        .map(|c| c as i64),
                 ),
                 current_value_usd: cents_to_usd(
-                    row.try_get::<Option<i32>, _>("market_price_cents").ok().flatten().map(|c| c as i64),
+                    row.try_get::<Option<i32>, _>("market_price_cents")
+                        .ok()
+                        .flatten()
+                        .map(|c| c as i64),
                 ),
                 grader: row.try_get("grader").unwrap_or_default(),
                 cert_number: row.try_get("cert_number").unwrap_or_default(),

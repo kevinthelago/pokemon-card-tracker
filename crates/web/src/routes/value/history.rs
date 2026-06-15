@@ -47,7 +47,11 @@ pub fn CardHistoryPage() -> impl IntoView {
     let params = use_params_map();
     let printing_id = move || params.with(|p| p.get("printing_id").unwrap_or_default());
     let workspace_id = move || {
-        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
     };
 
     let history = LocalResource::new(move || {

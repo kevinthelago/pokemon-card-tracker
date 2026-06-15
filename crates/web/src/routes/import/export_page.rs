@@ -31,14 +31,21 @@ pub fn ExportPage(workspace_id: Uuid) -> impl IntoView {
         let filters = ExportFilters {
             set_id: {
                 let v = set_id_filter.get();
-                if v.is_empty() { None } else { Some(v) }
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(v)
+                }
             },
             in_stock_only: Some(in_stock_only.get()),
             include_raw: Some(include_raw.get()),
             include_graded: Some(include_graded.get()),
             condition: None,
         };
-        let req = StartExportRequest { workspace_id, filters };
+        let req = StartExportRequest {
+            workspace_id,
+            filters,
+        };
 
         set_error_msg.set(None);
         set_step.set(ExportStep::Waiting);

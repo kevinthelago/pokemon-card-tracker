@@ -26,10 +26,7 @@ pub enum VerifyOutcome {
     },
     /// Cert does not exist in the grader's database — likely counterfeit or
     /// tampered slab. Must be flagged as a counterfeit signal.
-    NotFound {
-        grader: String,
-        cert_number: String,
-    },
+    NotFound { grader: String, cert_number: String },
     /// Grader API is down or rate-limited. Do not block cataloguing; retry later.
     Unavailable {
         grader: String,
@@ -73,7 +70,9 @@ impl VerifyOutcome {
     pub fn card_name(&self) -> Option<&str> {
         match self {
             Self::Verified { card_name, .. } => Some(card_name.as_str()),
-            Self::Mismatch { returned_card_name, .. } => Some(returned_card_name.as_str()),
+            Self::Mismatch {
+                returned_card_name, ..
+            } => Some(returned_card_name.as_str()),
             _ => None,
         }
     }
@@ -104,7 +103,6 @@ impl VerifyOutcome {
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::NotFound { .. })
     }
-
 }
 
 /// Adapts a specific grading company's API to a uniform verify interface.

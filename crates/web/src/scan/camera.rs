@@ -234,9 +234,7 @@ fn capture_and_decode(video: &HtmlVideoElement, canvas: &HtmlCanvasElement) -> O
     ctx.draw_image_with_html_video_element(video, 0.0, 0.0)
         .ok()?;
 
-    let image_data = ctx
-        .get_image_data(0.0, 0.0, w as f64, h as f64)
-        .ok()?;
+    let image_data = ctx.get_image_data(0.0, 0.0, w as f64, h as f64).ok()?;
 
     // web_sys::Uint8ClampedArray is re-exported from js_sys and has to_vec().
     let rgba: Vec<u8> = image_data.data().to_vec();
@@ -244,9 +242,7 @@ fn capture_and_decode(video: &HtmlVideoElement, canvas: &HtmlCanvasElement) -> O
     // RGBA → luma (BT.601 coefficients, integer arithmetic).
     let luma: Vec<u8> = rgba
         .chunks_exact(4)
-        .map(|px| {
-            ((px[0] as u32 * 299 + px[1] as u32 * 587 + px[2] as u32 * 114) / 1000) as u8
-        })
+        .map(|px| ((px[0] as u32 * 299 + px[1] as u32 * 587 + px[2] as u32 * 114) / 1000) as u8)
         .collect();
 
     // rxing returns Result<RXingResult, Exceptions>; .ok() drops decode failures.
@@ -287,8 +283,14 @@ async fn resolve_barcode(barcode: &str) -> Result<ScanResult, String> {
         resolved_as: api.resolved_as,
         printing: api.printing,
         grader: api.grading_verification.as_ref().map(|g| g.grader.clone()),
-        cert_number: api.grading_verification.as_ref().map(|g| g.cert_number.clone()),
-        grade: api.grading_verification.as_ref().and_then(|g| g.grade.clone()),
+        cert_number: api
+            .grading_verification
+            .as_ref()
+            .map(|g| g.cert_number.clone()),
+        grade: api
+            .grading_verification
+            .as_ref()
+            .and_then(|g| g.grade.clone()),
         needs_manual_entry: api.needs_manual_entry,
         error: api.error,
     })

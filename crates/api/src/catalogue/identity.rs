@@ -253,8 +253,8 @@ impl IdentityService {
         let mut result = Vec::with_capacity(cards.len());
 
         for card in cards {
-            let raw = serde_json::to_value(card)
-                .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+            let raw =
+                serde_json::to_value(card).map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
 
             let row = sqlx::query_as::<_, PrintingRow>(
                 "INSERT INTO printings (
@@ -311,7 +311,10 @@ pub fn build_tcg_query(q: &SearchQuery) -> String {
     }
     if let Some(set) = &q.set {
         // Set IDs are alphanumeric — strip quotes and spaces.
-        let safe = set.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+        let safe = set
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect::<String>();
         parts.push(format!("set.id:{}", safe));
     }
     if let Some(number) = &q.number {

@@ -24,7 +24,11 @@ pub struct CloverAdapter {
 
 impl CloverAdapter {
     pub fn new(client_id: String, client_secret: String) -> Self {
-        Self { client_id, client_secret, http: reqwest::Client::new() }
+        Self {
+            client_id,
+            client_secret,
+            http: reqwest::Client::new(),
+        }
     }
 
     fn merchant_url(&self, merchant_id: &str, path: &str) -> String {
@@ -278,7 +282,11 @@ impl PosAdapter for CloverAdapter {
                     })
                     .collect();
 
-                Some(AdapterSale { external_id: order_id, occurred_at, lines })
+                Some(AdapterSale {
+                    external_id: order_id,
+                    occurred_at,
+                    lines,
+                })
             })
             .collect();
 

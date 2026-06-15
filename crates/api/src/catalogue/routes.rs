@@ -237,9 +237,9 @@ async fn add_item(
             Ok((StatusCode::CREATED, Json(AddItemResponse::Inventory(item))))
         }
         ItemKind::Graded => {
-            let grader = body
-                .grader
-                .ok_or_else(|| AppError::Validation("grader is required for graded items".into()))?;
+            let grader = body.grader.ok_or_else(|| {
+                AppError::Validation("grader is required for graded items".into())
+            })?;
             let cert_number = body.cert_number.ok_or_else(|| {
                 AppError::Validation("cert_number is required for graded items".into())
             })?;
@@ -257,7 +257,10 @@ async fn add_item(
             };
 
             let instance = svc.add_card_instance(&req).await?;
-            Ok((StatusCode::CREATED, Json(AddItemResponse::Instance(instance))))
+            Ok((
+                StatusCode::CREATED,
+                Json(AddItemResponse::Instance(instance)),
+            ))
         }
     }
 }
@@ -270,9 +273,18 @@ mod tests {
 
     #[test]
     fn parse_known_grader_prefix() {
-        assert_eq!(parse_cert_barcode("PSA-12345678"), ("PSA".into(), "12345678".into()));
-        assert_eq!(parse_cert_barcode("bgs-12345"), ("BGS".into(), "12345".into()));
-        assert_eq!(parse_cert_barcode("CGC-ABC123"), ("CGC".into(), "ABC123".into()));
+        assert_eq!(
+            parse_cert_barcode("PSA-12345678"),
+            ("PSA".into(), "12345678".into())
+        );
+        assert_eq!(
+            parse_cert_barcode("bgs-12345"),
+            ("BGS".into(), "12345".into())
+        );
+        assert_eq!(
+            parse_cert_barcode("CGC-ABC123"),
+            ("CGC".into(), "ABC123".into())
+        );
         assert_eq!(parse_cert_barcode("sgc-99"), ("SGC".into(), "99".into()));
         assert_eq!(parse_cert_barcode("HGA-55"), ("HGA".into(), "55".into()));
     }

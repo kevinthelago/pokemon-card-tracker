@@ -47,7 +47,10 @@ enum Step {
     SelectMode,
     Search,
     Scan,
-    Review { printing: PrintingView, scan: Option<ScanResult> },
+    Review {
+        printing: PrintingView,
+        scan: Option<ScanResult>,
+    },
 }
 
 // ── Page root ──────────────────────────────────────────────────────────────
@@ -64,7 +67,10 @@ pub fn AddCardPage() -> impl IntoView {
     };
 
     let on_printing_selected = move |printing: PrintingView| {
-        set_step.set(Step::Review { printing, scan: None });
+        set_step.set(Step::Review {
+            printing,
+            scan: None,
+        });
     };
 
     let on_scan_result = move |result: ScanResult| {
@@ -287,9 +293,7 @@ where
         .as_ref()
         .and_then(|s| s.cert_number.clone())
         .unwrap_or_default();
-    let grade_val = scan_result
-        .as_ref()
-        .and_then(|s| s.grade.clone());
+    let grade_val = scan_result.as_ref().and_then(|s| s.grade.clone());
 
     let printing_clone = printing.clone();
     let grader_clone = grader.clone();
@@ -467,7 +471,9 @@ async fn fetch_printings(query: &str) -> Result<SearchResults, String> {
         .map_err(|e| e.to_string())?;
 
     if resp.ok() {
-        resp.json::<SearchResults>().await.map_err(|e| e.to_string())
+        resp.json::<SearchResults>()
+            .await
+            .map_err(|e| e.to_string())
     } else {
         Err(format!("HTTP {}", resp.status()))
     }

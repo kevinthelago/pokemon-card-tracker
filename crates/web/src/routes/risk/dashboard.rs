@@ -12,7 +12,11 @@ use super::{FlagKind, FlagSeverity, FlagStatus, RiskFlag, RiskSummary};
 pub fn RiskDashboardPage() -> impl IntoView {
     let params = use_params_map();
     let workspace_id = move || {
-        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
     };
 
     let (reload, set_reload) = signal(0u32);
@@ -48,7 +52,9 @@ pub fn RiskDashboardPage() -> impl IntoView {
         let _ = reload.get();
         async move {
             let wid = wid?;
-            api::fetch_risk_flags(wid, kind, severity, status, after).await.ok()
+            api::fetch_risk_flags(wid, kind, severity, status, after)
+                .await
+                .ok()
         }
     });
 
@@ -251,8 +257,11 @@ pub fn RiskDashboardPage() -> impl IntoView {
 #[component]
 fn SummaryWidgets(summary: RiskSummary) -> impl IntoView {
     let open_total: i64 = summary.counts_by_severity.iter().map(|c| c.open).sum();
-    let resolved_total: i64 =
-        summary.counts_by_severity.iter().map(|c| c.total - c.open).sum();
+    let resolved_total: i64 = summary
+        .counts_by_severity
+        .iter()
+        .map(|c| c.total - c.open)
+        .sum();
     let grand_total = open_total + resolved_total;
 
     view! {
@@ -406,12 +415,12 @@ fn FlagRow(
     on_select: Callback<leptos::ev::MouseEvent>,
     on_open: Callback<leptos::ev::MouseEvent>,
 ) -> impl IntoView {
-    let sev_label    = flag.severity.label();
-    let badge_class  = format!("badge {}", flag.severity.css_class());
-    let kind_label   = flag.kind.label();
-    let title        = flag.title.clone();
+    let sev_label = flag.severity.label();
+    let badge_class = format!("badge {}", flag.severity.css_class());
+    let kind_label = flag.kind.label();
+    let title = flag.title.clone();
     let status_label = flag.status.label();
-    let day          = flag.created_at.format("%Y-%m-%d").to_string();
+    let day = flag.created_at.format("%Y-%m-%d").to_string();
 
     let row_class = move || {
         if is_selected.get() {
@@ -462,8 +471,7 @@ fn FlagDrawer(
 
     let flag_id = flag.id;
     let is_open = matches!(flag.status, FlagStatus::Open);
-    let evidence_str =
-        serde_json::to_string_pretty(&flag.evidence).unwrap_or_else(|_| "{}".into());
+    let evidence_str = serde_json::to_string_pretty(&flag.evidence).unwrap_or_else(|_| "{}".into());
 
     let make_triage_handler = |status: &'static str| {
         let on_triaged = on_triaged.clone();

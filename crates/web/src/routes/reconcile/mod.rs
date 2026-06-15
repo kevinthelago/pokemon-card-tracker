@@ -89,7 +89,10 @@ fn overall_state_label(reports: &[ReconciliationReportDto], unmapped_count: usiz
     if reports.iter().any(|r| r.status == "syncing") {
         return "Syncing\u{2026}";
     }
-    if reports.iter().any(|r| r.status == "failed" || r.status == "stale") {
+    if reports
+        .iter()
+        .any(|r| r.status == "failed" || r.status == "stale")
+    {
         return "Sync error / stale";
     }
     if unmapped_count > 0 {
@@ -131,7 +134,12 @@ pub fn ReconcileDashboard() -> impl IntoView {
     let reports = LocalResource::new(move || {
         let wid = workspace_id();
         let _ = reload.get();
-        async move { api::fetch_reconcile_reports(wid).await.ok().unwrap_or_default() }
+        async move {
+            api::fetch_reconcile_reports(wid)
+                .await
+                .ok()
+                .unwrap_or_default()
+        }
     });
 
     let mapping_queue = LocalResource::new(move || {

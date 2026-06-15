@@ -5,8 +5,8 @@
 //! Allows a user to enter or scan a grader + cert# and see the verification
 //! result without needing to add the card to the catalogue.
 
-use leptos::prelude::*;
 use gloo_net::http::Request;
+use leptos::prelude::*;
 
 use super::{
     result_card::VerificationResultCard,
@@ -45,19 +45,14 @@ pub fn VerifyPage() -> impl IntoView {
             set_loading.set(false);
 
             match response {
-                Ok(resp) if resp.ok() => {
-                    match resp.json::<VerifyResponse>().await {
-                        Ok(data) => set_result.set(Some(data)),
-                        Err(e) => {
-                            set_api_error.set(Some(format!("Failed to parse response: {e}")));
-                        }
+                Ok(resp) if resp.ok() => match resp.json::<VerifyResponse>().await {
+                    Ok(data) => set_result.set(Some(data)),
+                    Err(e) => {
+                        set_api_error.set(Some(format!("Failed to parse response: {e}")));
                     }
-                }
+                },
                 Ok(resp) => {
-                    set_api_error.set(Some(format!(
-                        "Server error (HTTP {})",
-                        resp.status()
-                    )));
+                    set_api_error.set(Some(format!("Server error (HTTP {})", resp.status())));
                 }
                 Err(e) => {
                     set_api_error.set(Some(format!("Network error: {e}")));

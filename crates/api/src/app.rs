@@ -5,14 +5,12 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::{
-    catalogue, crypto::EncryptionKey, fraud,
-    grading::GradingService,
-    integrations::pokemontcg::PokemonTcgClient,
-    pos, workspace,
-};
 use crate::catalogue::valuation::ValuationService;
 use crate::integrations::pricecharting::PriceChartingClient;
+use crate::{
+    catalogue, crypto::EncryptionKey, fraud, grading::GradingService,
+    integrations::pokemontcg::PokemonTcgClient, pos, workspace,
+};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -33,7 +31,10 @@ impl AppState {
 
 pub fn build_valuation_service(pool: PgPool) -> Arc<ValuationService> {
     let api_key = std::env::var("PRICECHARTING_API_KEY").unwrap_or_default();
-    Arc::new(ValuationService::new(pool, PriceChartingClient::new(api_key)))
+    Arc::new(ValuationService::new(
+        pool,
+        PriceChartingClient::new(api_key),
+    ))
 }
 
 pub fn create_router() -> Router<AppState> {
@@ -44,7 +45,12 @@ pub fn create_router() -> Router<AppState> {
 
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .nest("/api", workspace::routes().merge(fraud::stolen::routes()).merge(catalogue::routes()))
+        .nest(
+            "/api",
+            workspace::routes()
+                .merge(fraud::stolen::routes())
+                .merge(catalogue::routes()),
+        )
         .nest("/api", fraud::routes::routes())
         .nest("/api", catalogue::routes::router())
         .nest("/api", crate::grading::routes::router())

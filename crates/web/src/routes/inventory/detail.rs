@@ -23,11 +23,14 @@ pub fn InventoryDetailPage() -> impl IntoView {
     let params = use_params_map();
 
     let workspace_id = move || {
-        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
     };
-    let item_id = move || {
-        params.with(|p| p.get("id").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
-    };
+    let item_id =
+        move || params.with(|p| p.get("id").as_deref().and_then(|s| Uuid::parse_str(s).ok()));
 
     let (reload, set_reload) = signal(0u32);
 
@@ -90,11 +93,7 @@ enum StatusMsg {
 }
 
 #[component]
-fn DetailView(
-    item: InventoryItem,
-    workspace_id: Uuid,
-    on_reload: Callback<()>,
-) -> impl IntoView {
+fn DetailView(item: InventoryItem, workspace_id: Uuid, on_reload: Callback<()>) -> impl IntoView {
     let (editing, set_editing) = signal(false);
     let (status, set_status) = signal(Option::<StatusMsg>::None);
 
@@ -254,10 +253,14 @@ fn EditForm(
     let (condition, set_condition) = signal(item.condition.clone().unwrap_or_default());
     let (quantity, set_quantity) = signal(item.quantity.to_string());
     let (acq_cost, set_acq_cost) = signal(
-        item.acquisition_cost.map(|d| d.to_string()).unwrap_or_default(),
+        item.acquisition_cost
+            .map(|d| d.to_string())
+            .unwrap_or_default(),
     );
     let (cur_value, set_cur_value) = signal(
-        item.current_value.map(|d| d.to_string()).unwrap_or_default(),
+        item.current_value
+            .map(|d| d.to_string())
+            .unwrap_or_default(),
     );
     let (notes, set_notes) = signal(item.notes.clone().unwrap_or_default());
     let (err, set_err) = signal(Option::<String>::None);
@@ -275,10 +278,18 @@ fn EditForm(
 
         let req = PatchRequest {
             version,
-            condition: if condition_val.is_empty() { None } else { Some(condition_val) },
+            condition: if condition_val.is_empty() {
+                None
+            } else {
+                Some(condition_val)
+            },
             quantity: quantity_val,
             acquisition_cost,
-            notes: if notes_val.is_empty() { None } else { Some(notes_val) },
+            notes: if notes_val.is_empty() {
+                None
+            } else {
+                Some(notes_val)
+            },
             current_value,
         };
 

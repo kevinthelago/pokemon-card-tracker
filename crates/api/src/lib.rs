@@ -17,7 +17,7 @@ pub use app::AppState;
 pub use error::AppError;
 pub use pos::mapping::{MappingService, PosProductMapping, UnmappedPosSku};
 pub use pos::reconcile::{
-    NullPosProvider, PosInventoryItem, PosSale, PosSaleLine, PosProvider,
+    NullPosProvider, PosInventoryItem, PosProvider, PosSale, PosSaleLine,
     ReconciliationDiscrepancy, ReconciliationReport, ReconciliationService, Transaction,
     TransactionLine,
 };

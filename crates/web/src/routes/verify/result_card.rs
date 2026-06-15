@@ -20,7 +20,8 @@ pub fn VerificationResultCard(result: VerifyResponse) -> impl IntoView {
                     <VerifiedBody result=result />
                 </div>
             </div>
-        }.into_any(),
+        }
+        .into_any(),
 
         "mismatch" => view! {
             <div class="result-card result-card--mismatch">
@@ -36,7 +37,8 @@ pub fn VerificationResultCard(result: VerifyResponse) -> impl IntoView {
                     />
                 </div>
             </div>
-        }.into_any(),
+        }
+        .into_any(),
 
         "not_found" => view! {
             <div class="result-card result-card--not-found">
@@ -51,7 +53,8 @@ pub fn VerificationResultCard(result: VerifyResponse) -> impl IntoView {
                     />
                 </div>
             </div>
-        }.into_any(),
+        }
+        .into_any(),
 
         _ => view! {
             <div class="result-card result-card--unavailable">
@@ -67,7 +70,8 @@ pub fn VerificationResultCard(result: VerifyResponse) -> impl IntoView {
                     />
                 </div>
             </div>
-        }.into_any(),
+        }
+        .into_any(),
     }
 }
 
@@ -99,7 +103,11 @@ fn VerifiedBody(result: VerifyResponse) -> impl IntoView {
 }
 
 #[component]
-fn MismatchBody(grader: String, cert_number: String, detail: Option<MismatchDetail>) -> impl IntoView {
+fn MismatchBody(
+    grader: String,
+    cert_number: String,
+    detail: Option<MismatchDetail>,
+) -> impl IntoView {
     view! {
         <div class="result-card__warning">
             <p>

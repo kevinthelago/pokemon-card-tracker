@@ -187,8 +187,13 @@ impl MappingService {
         .fetch_one(pool)
         .await
         .map_err(|e| match &e {
-            sqlx::Error::Database(db) if db.constraint() == Some("pos_product_mappings_connection_id_pos_sku_key") => {
-                AppError::BadRequest(format!("SKU '{}' is already mapped for this connection", pos_sku))
+            sqlx::Error::Database(db)
+                if db.constraint() == Some("pos_product_mappings_connection_id_pos_sku_key") =>
+            {
+                AppError::BadRequest(format!(
+                    "SKU '{}' is already mapped for this connection",
+                    pos_sku
+                ))
             }
             _ => AppError::from(e),
         })?;
@@ -253,9 +258,14 @@ impl MappingService {
         .fetch_one(pool)
         .await?;
 
-        let backfill_count =
-            Self::backfill_unmapped_lines(pool, workspace_id, old.connection_id, &old.pos_sku, &updated)
-                .await?;
+        let backfill_count = Self::backfill_unmapped_lines(
+            pool,
+            workspace_id,
+            old.connection_id,
+            &old.pos_sku,
+            &updated,
+        )
+        .await?;
 
         Ok(MappingWithBackfill {
             mapping: updated,
@@ -270,13 +280,12 @@ impl MappingService {
         workspace_id: Uuid,
         mapping_id: Uuid,
     ) -> Result<(), AppError> {
-        let rows = sqlx::query(
-            "DELETE FROM pos_product_mappings WHERE id = $1 AND workspace_id = $2",
-        )
-        .bind(mapping_id)
-        .bind(workspace_id)
-        .execute(pool)
-        .await?;
+        let rows =
+            sqlx::query("DELETE FROM pos_product_mappings WHERE id = $1 AND workspace_id = $2")
+                .bind(mapping_id)
+                .bind(workspace_id)
+                .execute(pool)
+                .await?;
 
         if rows.rows_affected() == 0 {
             return Err(AppError::NotFound);
@@ -416,10 +425,8 @@ async fn handle_list_mappings(
     Path(wid): Path<Uuid>,
     Query(q): Query<MappingQuery>,
 ) -> Result<Json<MappingQueue>, AppError> {
-    let mappings =
-        MappingService::list_mappings(&state.pool, wid, q.connection_id).await?;
-    let unmapped =
-        MappingService::list_unmapped(&state.pool, wid, q.connection_id).await?;
+    let mappings = MappingService::list_mappings(&state.pool, wid, q.connection_id).await?;
+    let unmapped = MappingService::list_unmapped(&state.pool, wid, q.connection_id).await?;
     Ok(Json(MappingQueue { mappings, unmapped }))
 }
 
@@ -444,13 +451,8 @@ async fn handle_update_mapping(
     Path((wid, mapping_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMappingRequest>,
 ) -> Result<Json<MappingWithBackfill>, AppError> {
-    let result = MappingService::update_mapping(
-        &state.pool,
-        wid,
-        mapping_id,
-        req.printing_id,
-    )
-    .await?;
+    let result =
+        MappingService::update_mapping(&state.pool, wid, mapping_id, req.printing_id).await?;
     Ok(Json(result))
 }
 

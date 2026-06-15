@@ -158,7 +158,9 @@ async fn require_owner(
     }
     match row.role {
         Some(MemberRole::Owner) => Ok(()),
-        _ => Err(AppError::Forbidden("only owners can manage team members".into())),
+        _ => Err(AppError::Forbidden(
+            "only owners can manage team members".into(),
+        )),
     }
 }
 
@@ -229,7 +231,10 @@ async fn list_team(
     })
     .collect();
 
-    Ok(Json(TeamResponse { members, pending_invites }))
+    Ok(Json(TeamResponse {
+        members,
+        pending_invites,
+    }))
 }
 
 /// POST /api/workspaces/:wid/invites
@@ -309,8 +314,7 @@ async fn send_invite(
     let base_url = state.base_url.clone();
     let invite_email = email.clone();
     tokio::spawn(async move {
-        if let Err(e) =
-            send_invite_email(&mailer, &base_url, &invite_email, &token_for_email).await
+        if let Err(e) = send_invite_email(&mailer, &base_url, &invite_email, &token_for_email).await
         {
             tracing::warn!("invite email failed for {invite_email}: {e}");
         }
@@ -464,22 +468,20 @@ async fn remove_member(
     .fetch_optional(&state.pool)
     .await?;
 
-    if matches!(current_role, Some(MemberRole::Owner))
-        && count_owners(&state.pool, wid).await? <= 1
+    if matches!(current_role, Some(MemberRole::Owner)) && count_owners(&state.pool, wid).await? <= 1
     {
         return Err(AppError::Forbidden(
             "cannot remove the last owner of a workspace".into(),
         ));
     }
 
-    let deleted = sqlx::query(
-        "DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
-    )
-    .bind(wid)
-    .bind(uid)
-    .execute(&state.pool)
-    .await?
-    .rows_affected();
+    let deleted =
+        sqlx::query("DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+            .bind(wid)
+            .bind(uid)
+            .execute(&state.pool)
+            .await?
+            .rows_affected();
 
     if deleted == 0 {
         return Err(AppError::NotFound);
@@ -509,10 +511,14 @@ async fn accept_invite(
     .ok_or(AppError::NotFound)?;
 
     if invite.cancelled_at.is_some() {
-        return Err(AppError::BadRequest("this invitation has been cancelled".into()));
+        return Err(AppError::BadRequest(
+            "this invitation has been cancelled".into(),
+        ));
     }
     if invite.accepted_at.is_some() {
-        return Err(AppError::BadRequest("this invitation has already been used".into()));
+        return Err(AppError::BadRequest(
+            "this invitation has already been used".into(),
+        ));
     }
     if invite.expires_at < Utc::now() {
         return Err(AppError::BadRequest(
@@ -523,8 +529,7 @@ async fn accept_invite(
     let user = match maybe_user {
         Some(u) => u,
         None => {
-            let redirect_url =
-                format!("{}/signup?invite_token={}", state.base_url, token);
+            let redirect_url = format!("{}/signup?invite_token={}", state.base_url, token);
             return Ok(Redirect::temporary(&redirect_url).into_response());
         }
     };
@@ -635,6 +640,9 @@ mod tests {
     fn change_role_body_deserializes_staff() {
         let json = r#"{"role":"staff"}"#;
         let body: ChangeRoleBody = serde_json::from_str(json).unwrap();
-        assert!(matches!(body.role, crate::models::workspace::MemberRole::Staff));
+        assert!(matches!(
+            body.role,
+            crate::models::workspace::MemberRole::Staff
+        ));
     }
 }

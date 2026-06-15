@@ -124,12 +124,8 @@ pub trait PosAdapter: Send + Sync {
 
     async fn revoke_token(&self, access_token: &str) -> Result<(), AppError>;
 
-    fn verify_webhook_signature(
-        &self,
-        headers: &HeaderMap,
-        body: &[u8],
-        signing_key: &str,
-    ) -> bool;
+    fn verify_webhook_signature(&self, headers: &HeaderMap, body: &[u8], signing_key: &str)
+        -> bool;
 }
 
 // ---------------------------------------------------------------------------

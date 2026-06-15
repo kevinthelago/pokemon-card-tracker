@@ -34,8 +34,17 @@ pub struct ValuationItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ItemValue {
-    Current { price_usd: f64, source: String, fetched_at: String },
-    Stale { price_usd: f64, source: String, fetched_at: String, stale_seconds: i64 },
+    Current {
+        price_usd: f64,
+        source: String,
+        fetched_at: String,
+    },
+    Stale {
+        price_usd: f64,
+        source: String,
+        fetched_at: String,
+        stale_seconds: i64,
+    },
     NoData,
     Pending,
 }
@@ -47,7 +56,11 @@ pub async fn fetch_valuations(workspace_id: Uuid) -> Result<ValuationsResponse, 
 }
 
 pub async fn post_refresh(workspace_id: Uuid) -> Result<(), String> {
-    api::post_void(&format!("/valuations/refresh?workspace_id={}", workspace_id)).await
+    api::post_void(&format!(
+        "/valuations/refresh?workspace_id={}",
+        workspace_id
+    ))
+    .await
 }
 
 // ── Page component ─────────────────────────────────────────────────────────
@@ -56,9 +69,7 @@ pub async fn post_refresh(workspace_id: Uuid) -> Result<(), String> {
 #[component]
 pub fn ValuePage() -> impl IntoView {
     let params = use_params_map();
-    let workspace_id = move || {
-        params.with(|p| p.get("wid").and_then(|s| Uuid::parse_str(&s).ok()))
-    };
+    let workspace_id = move || params.with(|p| p.get("wid").and_then(|s| Uuid::parse_str(&s).ok()));
 
     let (reload, set_reload) = signal(0u32);
     let (refreshing, set_refreshing) = signal(false);
@@ -154,7 +165,8 @@ fn ValuationTable(items: Vec<ValuationItem>) -> impl IntoView {
                     "Add cards through the catalogue to see their market values here."
                 </p>
             </div>
-        }.into_any();
+        }
+        .into_any();
     }
 
     view! {
