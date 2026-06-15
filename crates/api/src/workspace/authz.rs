@@ -12,6 +12,12 @@ use crate::{
     models::workspace::{MemberRole, WorkspaceKind},
 };
 
+#[derive(sqlx::FromRow)]
+struct WsAuthRow {
+    kind: WorkspaceKind,
+    role: MemberRole,
+}
+
 /// Full auth context for workspace-scoped endpoints.
 ///
 /// Resolution:
@@ -43,14 +49,14 @@ where
 
         let target_ws = header_workspace_id(&parts.headers).unwrap_or(claims.workspace_id);
 
-        let row = sqlx::query!(
-            r#"SELECT w.kind AS "kind: WorkspaceKind", wm.role AS "role: MemberRole"
+        let row: WsAuthRow = sqlx::query_as(
+            r#"SELECT w.kind, wm.role
                FROM workspace_members wm
                JOIN workspaces w ON w.id = wm.workspace_id
                WHERE wm.user_id = $1 AND wm.workspace_id = $2"#,
-            claims.sub,
-            target_ws,
         )
+        .bind(claims.sub)
+        .bind(target_ws)
         .fetch_optional(&app.pool)
         .await
         .map_err(AppError::from)?
