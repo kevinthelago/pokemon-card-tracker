@@ -16,9 +16,11 @@ uuid = { version = "1", features = ["v4", "serde", "js"] }
 chrono = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-gloo-net = { version = "0.6", features = ["http"] }
+gloo-net = { version = "0.6", features = ["http", "json"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 console_error_panic_hook = "0.1"
+js-sys = "0.3"
+rxing = { version = "0.5", default-features = false }
 web-sys = { version = "0.3", features = [
     "Window",
     "Location",
@@ -35,8 +37,7 @@ web-sys = { version = "0.3", features = [
     "MediaStreamTrack",
     "HtmlVideoElement",
     "HtmlCanvasElement",
+    "HtmlSelectElement",
     "CanvasRenderingContext2d",
     "ImageData",
 ] }
-js-sys = "0.3"
-rxing  = { version = "0.5", default-features = false }

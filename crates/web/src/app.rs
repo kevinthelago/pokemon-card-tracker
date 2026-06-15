@@ -14,6 +14,7 @@ use crate::routes::{
     risk::RiskDashboardPage,
     settings::{pos::PosSettingsPage, team::TeamPage},
     stolen::{DisputePage, ModeratorQueue, MyReports, ReportForm},
+    verify::page::VerifyPage,
 };
 
 #[component]
@@ -50,6 +51,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/catalogue/:wid/export") view=ExportRoute />
                 <Route path=path!("/workspaces/:wid/risk") view=RiskDashboardPage />
                 <Route path=path!("/catalogue/add") view=AddCardPage />
+                <Route path=path!("/verify") view=VerifyPage />
             </Routes>
         </Router>
     }
