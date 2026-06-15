@@ -1,13 +1,15 @@
 //! M2 — Inventory list page (CSR).
 //!
 //! Virtualized infinite-scroll list unifying raw (qty-tracked) and graded
-//! (unique) items. Filter bar narrows the result set; bulk-select enables
-//! bulk edit and delete.
+//! (unique) items.  Filter bar narrows the result set; bulk-select enables
+//! bulk edit and delete.  Density toggle switches between comfortable and
+//! compact row layouts.  Export button triggers a CSV download.
 
 use std::collections::HashSet;
 
 use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
+use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::{
@@ -16,6 +18,33 @@ use crate::{
 };
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Density {
+    Comfortable,
+    Compact,
+}
+
+impl Density {
+    fn class(self) -> &'static str {
+        match self {
+            Density::Comfortable => "inventory-table--comfortable",
+            Density::Compact => "inventory-table--compact",
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Density::Comfortable => "Compact",
+            Density::Compact => "Comfortable",
+        }
+    }
+    fn toggle(self) -> Density {
+        match self {
+            Density::Comfortable => Density::Compact,
+            Density::Compact => Density::Comfortable,
+        }
+    }
+}
 
 #[component]
 pub fn InventoryListPage() -> impl IntoView {
@@ -30,6 +59,8 @@ pub fn InventoryListPage() -> impl IntoView {
     let (is_loading, set_loading) = signal(false);
     let (selected, set_selected) = signal(HashSet::<Uuid>::new());
     let (bulk_msg, set_bulk_msg) = signal(Option::<String>::None);
+    let (density, set_density) = signal(Density::Comfortable);
+    let (show_bulk_edit, set_show_bulk_edit) = signal(false);
 
     // Load (or reload) from scratch whenever the filter changes.
     Effect::new(move || {
@@ -38,6 +69,7 @@ pub fn InventoryListPage() -> impl IntoView {
         set_items.set(Vec::new());
         set_next_cursor.set(None);
         set_selected.set(HashSet::new());
+        set_show_bulk_edit.set(false);
 
         if let Some(wid) = wid {
             set_loading.set(true);
@@ -112,12 +144,59 @@ pub fn InventoryListPage() -> impl IntoView {
         set_selected.set(ids);
     };
 
-    let clear_selection = move || set_selected.set(HashSet::new());
+    let clear_selection = move || {
+        set_selected.set(HashSet::new());
+        set_show_bulk_edit.set(false);
+    };
+
+    // Export URL derived from current filter + workspace.
+    let export_url = move || {
+        let wid = workspace_id()?;
+        let f = filter.get();
+        let mut url = format!("/api/workspaces/{wid}/catalogue/items/export?limit=10000");
+        if let Some(s) = &f.search {
+            url.push_str(&format!("&search={s}"));
+        }
+        if let Some(k) = &f.kind {
+            url.push_str(&format!("&kind={k}"));
+        }
+        if let Some(sc) = &f.set_code {
+            url.push_str(&format!("&set_code={sc}"));
+        }
+        if let Some(r) = &f.rarity {
+            url.push_str(&format!("&rarity={r}"));
+        }
+        if let Some(c) = &f.condition {
+            url.push_str(&format!("&condition={c}"));
+        }
+        if f.risk_flagged {
+            url.push_str("&risk_flagged=true");
+        }
+        url.push_str(&format!("&sort={}&order={}", f.sort, f.order));
+        Some(url)
+    };
 
     view! {
         <div class="inventory-page">
             <header class="inventory-page__header">
                 <h1>"Inventory"</h1>
+                <div class="inventory-page__header-actions">
+                    {move || export_url().map(|url| view! {
+                        <a
+                            href=url
+                            download="inventory.csv"
+                            class="btn btn--sm"
+                        >
+                            "Export CSV"
+                        </a>
+                    })}
+                    <button
+                        class="btn btn--sm"
+                        on:click=move |_| set_density.update(|d| *d = d.toggle())
+                    >
+                        {move || density.get().label()}
+                    </button>
+                </div>
             </header>
 
             <FilterBar filter=filter set_filter=set_filter />
@@ -128,9 +207,35 @@ pub fn InventoryListPage() -> impl IntoView {
                     view! {
                         <BulkActionBar
                             count=sel_count
+                            show_edit=show_bulk_edit
+                            on_toggle_edit=Callback::new(move |_: ()| {
+                                set_show_bulk_edit.update(|v| *v = !*v);
+                            })
                             on_delete=Callback::new(move |_: ()| bulk_delete())
                             on_clear=Callback::new(move |_: ()| clear_selection())
                             msg=bulk_msg
+                        />
+                    }.into_any()
+                } else {
+                    view! { <div /> }.into_any()
+                }
+            }}
+
+            {move || {
+                if show_bulk_edit.get() {
+                    let wid = workspace_id();
+                    let ids: Vec<Uuid> = selected.get().into_iter().collect();
+                    view! {
+                        <BulkEditForm
+                            ids=ids
+                            workspace_id=wid
+                            on_done=Callback::new(move |msg: String| {
+                                set_bulk_msg.set(Some(msg));
+                                set_show_bulk_edit.set(false);
+                                // Reload the list to reflect edits.
+                                set_filter.update(|f| { let _ = f; });
+                            })
+                            on_cancel=Callback::new(move |_: ()| set_show_bulk_edit.set(false))
                         />
                     }.into_any()
                 } else {
@@ -148,6 +253,7 @@ pub fn InventoryListPage() -> impl IntoView {
             <InventoryTable
                 items=items
                 selected=selected
+                density=density
                 on_toggle=Callback::new(move |id: Uuid| toggle_select(id))
                 workspace_id=Signal::derive(workspace_id)
             />
@@ -208,7 +314,11 @@ fn FilterBar(
                     type="checkbox"
                     prop:checked=move || filter.get().risk_flagged
                     on:change=move |ev| {
-                        let checked = event_target_checked(&ev);
+                        use wasm_bindgen::JsCast;
+                        let checked = ev.target()
+                            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                            .map(|i| i.checked())
+                            .unwrap_or(false);
                         set_filter.update(|f| f.risk_flagged = checked);
                     }
                 />
@@ -244,6 +354,8 @@ fn FilterBar(
 #[component]
 fn BulkActionBar(
     count: usize,
+    show_edit: ReadSignal<bool>,
+    on_toggle_edit: Callback<()>,
     on_delete: Callback<()>,
     on_clear: Callback<()>,
     msg: ReadSignal<Option<String>>,
@@ -251,6 +363,13 @@ fn BulkActionBar(
     view! {
         <div class="bulk-bar">
             <span class="bulk-bar__count">{count}" selected"</span>
+            <button
+                class="btn btn--sm"
+                class:btn--active=move || show_edit.get()
+                on:click=move |_| on_toggle_edit.run(())
+            >
+                "Edit"
+            </button>
             <button class="btn btn--danger btn--sm" on:click=move |_| on_delete.run(())>
                 "Delete"
             </button>
@@ -262,23 +381,103 @@ fn BulkActionBar(
     }
 }
 
+// ─── Bulk edit form ───────────────────────────────────────────────────────────
+
+#[component]
+fn BulkEditForm(
+    ids: Vec<Uuid>,
+    workspace_id: Option<Uuid>,
+    on_done: Callback<String>,
+    on_cancel: Callback<()>,
+) -> impl IntoView {
+    let (condition, set_condition) = signal(String::new());
+    let (acq_cost, set_acq_cost) = signal(String::new());
+    let (err, set_err) = signal(Option::<String>::None);
+
+    let submit = move || {
+        let wid = match workspace_id {
+            Some(w) => w,
+            None => return,
+        };
+        let cond = condition.get();
+        let op = BulkOp::Edit {
+            ids: ids.clone(),
+            condition: if cond.is_empty() { None } else { Some(cond) },
+            acquisition_cost: acq_cost.get().parse::<Decimal>().ok(),
+        };
+        leptos::task::spawn_local(async move {
+            match api::bulk_inventory(wid, &op).await {
+                Ok(n) => on_done.run(format!("Updated {n} item(s).")),
+                Err(e) => set_err.set(Some(format!("Edit failed: {e}"))),
+            }
+        });
+    };
+
+    view! {
+        <form
+            class="bulk-edit-form"
+            on:submit=move |ev| { ev.prevent_default(); submit(); }
+        >
+            <span class="bulk-edit-form__title">"Bulk edit"</span>
+
+            <label class="field">
+                "Condition (leave blank to keep)"
+                <select on:change=move |ev| set_condition.set(event_target_value(&ev))>
+                    <option value="">"— no change —"</option>
+                    <option value="mint">"Mint"</option>
+                    <option value="near_mint">"Near Mint"</option>
+                    <option value="lightly_played">"Lightly Played"</option>
+                    <option value="moderately_played">"Moderately Played"</option>
+                    <option value="heavily_played">"Heavily Played"</option>
+                    <option value="damaged">"Damaged"</option>
+                </select>
+            </label>
+
+            <label class="field">
+                "Acquisition cost (leave blank to keep)"
+                <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    prop:value=move || acq_cost.get()
+                    on:input=move |ev| set_acq_cost.set(event_target_value(&ev))
+                />
+            </label>
+
+            {move || err.get().map(|e| view! { <p class="edit-form__error">{e}</p> })}
+
+            <div class="bulk-edit-form__actions">
+                <button type="submit" class="btn btn--primary btn--sm">"Apply"</button>
+                <button
+                    type="button"
+                    class="btn btn--sm"
+                    on:click=move |_| on_cancel.run(())
+                >
+                    "Cancel"
+                </button>
+            </div>
+        </form>
+    }
+}
+
 // ─── Inventory table ──────────────────────────────────────────────────────────
 
 #[component]
 fn InventoryTable(
     items: ReadSignal<Vec<InventoryItem>>,
     selected: ReadSignal<HashSet<Uuid>>,
+    density: ReadSignal<Density>,
     on_toggle: Callback<Uuid>,
     workspace_id: Signal<Option<Uuid>>,
 ) -> impl IntoView {
     view! {
-        <div class="inventory-table">
+        <div class="inventory-table" class:inventory-table--compact=move || density.get() == Density::Compact>
             <div class="inventory-table__header">
                 <span class="col-check" />
                 <span class="col-image" />
                 <span class="col-name">"Name"</span>
                 <span class="col-type">"Type"</span>
-                <span class="col-qty">"Qty"</span>
+                <span class="col-qty">"Qty / Grade"</span>
                 <span class="col-value">"Value"</span>
                 <span class="col-risk">"Risk"</span>
             </div>
@@ -413,6 +612,7 @@ fn EmptyState() -> impl IntoView {
     view! {
         <div class="empty-state">
             <p class="empty-state__msg">"No inventory items yet."</p>
+            <a href="/catalogue/add" class="btn btn--primary">"Add a card"</a>
         </div>
     }
 }
