@@ -12,7 +12,7 @@ name = "cardguard-api"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "multipart"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -28,3 +28,5 @@ tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 rand = "0.8"
 dotenvy = "0.15"
+
+csv = "1"

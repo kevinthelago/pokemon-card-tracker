@@ -4,7 +4,7 @@ use sqlx::PgPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::{fraud, workspace};
+use crate::{catalogue, fraud, workspace};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,6 +22,7 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .nest("/api", workspace::routes().merge(fraud::stolen::routes()))
+        .nest("/api/catalogue", catalogue::csv_routes())
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)
