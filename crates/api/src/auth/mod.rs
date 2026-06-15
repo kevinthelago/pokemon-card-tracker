@@ -1,3 +1,13 @@
+pub mod claims;
+pub mod email;
+pub mod models;
+pub mod password;
+pub mod routes;
+pub mod service;
+
+#[cfg(test)]
+mod tests;
+
 use axum::{
     async_trait,
     extract::{FromRef, FromRequestParts},
@@ -8,7 +18,8 @@ use uuid::Uuid;
 
 use crate::{app::AppState, error::AppError};
 
-/// Authenticated user extracted from the `Authorization: Bearer <token>` header.
+/// Authenticated user extracted from `Authorization: Bearer <jwt>`.
+/// Kept minimal for backward compatibility with invites.rs which only uses id/email.
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub id: Uuid,
@@ -23,9 +34,7 @@ where
 {
     type Rejection = AppError;
 
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let app = AppState::from_ref(state);
-
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let token = parts
             .headers
             .get("Authorization")
@@ -33,21 +42,9 @@ where
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or(AppError::Unauthorized)?;
 
-        let row = sqlx::query!(
-            r#"
-            SELECT u.id, u.email
-            FROM sessions s
-            JOIN users u ON u.id = s.user_id
-            WHERE s.token = $1 AND s.expires_at > NOW()
-            "#,
-            token
-        )
-        .fetch_optional(&app.pool)
-        .await
-        .map_err(AppError::from)?
-        .ok_or(AppError::Unauthorized)?;
-
-        Ok(AuthUser { id: row.id, email: row.email })
+        let secret = service::jwt_secret();
+        let claims = claims::decode_access_token(token, secret.as_bytes())?;
+        Ok(AuthUser { id: claims.sub, email: claims.email })
     }
 }
 

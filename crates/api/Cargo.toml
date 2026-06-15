@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }
+axum-extra = { version = "0.9", features = ["cookie"] }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -24,3 +25,9 @@ tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 lettre = { version = "0.11", features = ["tokio1-native-tls", "builder"] }
 rand = "0.8"
 dotenvy = "0.15"
+argon2 = "0.5"
+jsonwebtoken = "9"
+sha2 = "0.10"
+hex = "0.4"
+cookie = { version = "0.18", features = ["percent-encode"] }
+time = "0.3"
