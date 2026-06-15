@@ -64,7 +64,7 @@ pub fn ModeratorQueue() -> impl IntoView {
                                             view! {
                                                 <QueueItem
                                                     report=report
-                                                    on_action=trigger_reload
+                                                    on_action=Callback::new(move |_: ()| trigger_reload())
                                                 />
                                             }
                                         }
@@ -80,7 +80,7 @@ pub fn ModeratorQueue() -> impl IntoView {
 }
 
 #[component]
-fn QueueItem(report: QueueReport, on_action: impl Fn() + 'static + Clone) -> impl IntoView {
+fn QueueItem(report: QueueReport, on_action: Callback<()>) -> impl IntoView {
     let expanded = RwSignal::new(false);
     let moderator_notes = RwSignal::new(String::new());
 
@@ -88,7 +88,6 @@ fn QueueItem(report: QueueReport, on_action: impl Fn() + 'static + Clone) -> imp
     let (error, set_error) = signal(Option::<String>::None);
 
     let report_id = report.id.clone();
-    let on_action_clone = on_action.clone();
 
     let handle_confirm = {
         let report_id = report_id.clone();
@@ -97,10 +96,9 @@ fn QueueItem(report: QueueReport, on_action: impl Fn() + 'static + Clone) -> imp
             set_error.set(None);
             let id = report_id.clone();
             let notes = moderator_notes.get();
-            let on_action = on_action_clone.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match api::confirm_stolen_report(id, (!notes.is_empty()).then_some(notes)).await {
-                    Ok(()) => on_action(),
+                    Ok(()) => on_action.run(()),
                     Err(e) => set_error.set(Some(format!("Confirm failed: {e}"))),
                 }
                 set_busy.set(false);
@@ -109,16 +107,14 @@ fn QueueItem(report: QueueReport, on_action: impl Fn() + 'static + Clone) -> imp
     };
 
     let handle_reject = {
-        let report_id = report_id.clone();
         move |_: leptos::ev::MouseEvent| {
             set_busy.set(true);
             set_error.set(None);
             let id = report_id.clone();
             let notes = moderator_notes.get();
-            let on_action = on_action.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match api::reject_stolen_report(id, (!notes.is_empty()).then_some(notes)).await {
-                    Ok(()) => on_action(),
+                    Ok(()) => on_action.run(()),
                     Err(e) => set_error.set(Some(format!("Reject failed: {e}"))),
                 }
                 set_busy.set(false);
