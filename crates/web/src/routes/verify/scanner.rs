@@ -37,9 +37,9 @@ pub fn CertScanner(
     )
     .unwrap_or(false);
 
-    let submit_manual = {
+    let do_submit = {
         let on_scan = on_scan.clone();
-        move |_| {
+        move || {
             let grader = manual_grader.get();
             let cert = manual_cert.get();
             if cert.trim().is_empty() {
@@ -50,6 +50,7 @@ pub fn CertScanner(
             on_scan.run((grader, cert.trim().to_string()));
         }
     };
+    let submit_manual = { let do_submit = do_submit.clone(); move |_| do_submit() };
 
     let start_scan = {
         let set_scanning = set_scanning.clone();
@@ -113,8 +114,7 @@ pub fn CertScanner(
                         }
                         on:keydown=move |ev| {
                             if ev.key() == "Enter" {
-                                use wasm_bindgen::JsCast;
-                                submit_manual(ev.unchecked_into::<web_sys::MouseEvent>());
+                                do_submit();
                             }
                         }
                     />

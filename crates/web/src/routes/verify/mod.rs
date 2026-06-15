@@ -1,4 +1,4 @@
-mod page;
+pub mod page;
 mod result_card;
 mod scanner;
 pub mod types;
