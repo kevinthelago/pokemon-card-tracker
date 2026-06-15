@@ -1,35 +1,52 @@
 //! Axum route handlers for the valuation feature.
 //!
-//! Mounts under `/api/v1` by foundation's `app.rs`. The `routes()` fn is the
-//! only public symbol; foundation pre-mounts it as a stub and this module fills it.
+//! Mounts under `/api` via `app::create_router`. The `routes()` fn is the only
+//! public symbol; `app.rs` nests it at `/api`.
+//!
+//! Workspace scoping: reads the `X-Workspace-Id` header (or `?workspace_id` query param)
+//! since the stub auth middleware exposes AuthUser but not a workspace claim yet.
 //!
 //! Endpoints:
-//!   GET  /valuations          — workspace valuation summary + total
+//!   GET  /valuations          — workspace valuation list + total
 //!   POST /valuations/refresh  — on-demand price refresh (all or single printing)
-//!   GET  /valuations/history  — price history for a single printing
+//!   GET  /valuations/history  — price history snapshots for one printing
 
 use axum::{
     extract::{Query, State},
+    http::HeaderMap,
     routing::{get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::catalogue::valuation::ValuationStatus;
-use crate::error::ApiError;
-use crate::middleware::auth::WorkspaceClaim;
+use crate::auth::AuthUser;
+use crate::error::AppError;
 
 // ── Router ─────────────────────────────────────────────────────────────────
 
-/// Returns the Router for this module. Foundation calls this to pre-mount the stub.
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/valuations", get(get_valuations))
         .route("/valuations/refresh", post(trigger_refresh))
         .route("/valuations/history", get(get_history))
+}
+
+// ── Workspace extraction ───────────────────────────────────────────────────
+
+/// Extract workspace_id from `X-Workspace-Id` header or `workspace_id` query param.
+fn workspace_from_headers_or_query(
+    headers: &HeaderMap,
+    workspace_id_param: Option<Uuid>,
+) -> Result<Uuid, AppError> {
+    if let Some(val) = headers.get("X-Workspace-Id") {
+        let s = val.to_str().map_err(|_| AppError::BadRequest("invalid X-Workspace-Id header".into()))?;
+        return Uuid::parse_str(s).map_err(|_| AppError::BadRequest("X-Workspace-Id is not a valid UUID".into()));
+    }
+    workspace_id_param.ok_or_else(|| AppError::BadRequest("workspace_id is required".into()))
 }
 
 // ── Response shapes ────────────────────────────────────────────────────────
@@ -42,11 +59,9 @@ pub struct ValuationItem {
     pub condition: String,
     pub quantity: i32,
     pub value: ItemValue,
-    /// Line total = price × quantity; null when no price data.
     pub line_total_usd: Option<Decimal>,
 }
 
-/// The value sub-object on each inventory row — mirrors `ValuationStatus` for JSON consumers.
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ItemValue {
@@ -59,25 +74,20 @@ pub enum ItemValue {
         price_usd: Decimal,
         source: String,
         fetched_at: DateTime<Utc>,
-        /// Seconds since the last successful fetch.
         stale_seconds: i64,
     },
-    /// Pricing sources returned no data for this card.
     NoData,
-    /// Card was just added; the first refresh job hasn't run yet.
     Pending,
 }
 
 #[derive(Debug, Serialize)]
 pub struct GetValuationsResponse {
     pub data: Vec<ValuationItem>,
-    /// Workspace total in USD (sum of line totals for priced items).
     pub total_usd: Decimal,
 }
 
 #[derive(Debug, Serialize)]
 pub struct RefreshResponse {
-    /// Number of printings processed (includes no-data outcomes).
     pub refreshed: u32,
 }
 
@@ -94,19 +104,23 @@ pub struct HistoryResponse {
     pub data: Vec<HistoryPoint>,
 }
 
-// ── Query params ───────────────────────────────────────────────────────────
+// ── Query param structs ────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceQuery {
+    pub workspace_id: Option<Uuid>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct RefreshParams {
-    /// If present, refresh only this printing; otherwise refresh all stale/pending.
+    pub workspace_id: Option<Uuid>,
     pub printing_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct HistoryParams {
-    /// The TCG API printing ID to fetch history for.
+    pub workspace_id: Option<Uuid>,
     pub printing_id: String,
-    /// Max number of data points to return (default 90, max 365).
     pub limit: Option<i64>,
 }
 
@@ -114,12 +128,15 @@ pub struct HistoryParams {
 
 async fn get_valuations(
     State(state): State<AppState>,
-    claim: WorkspaceClaim,
-) -> Result<Json<GetValuationsResponse>, ApiError> {
+    _auth: AuthUser,
+    headers: HeaderMap,
+    Query(q): Query<WorkspaceQuery>,
+) -> Result<Json<GetValuationsResponse>, AppError> {
+    let workspace_id = workspace_from_headers_or_query(&headers, q.workspace_id)?;
     let svc = state.valuation_service();
 
-    let rows = svc.workspace_valuations(claim.workspace_id).await?;
-    let total = svc.workspace_total(claim.workspace_id).await?;
+    let rows = svc.workspace_valuations(workspace_id).await?;
+    let total = svc.workspace_total(workspace_id).await?;
 
     let data = rows
         .into_iter()
@@ -145,14 +162,9 @@ async fn get_valuations(
                         Some(price * Decimal::from(r.quantity)),
                     )
                 }
-                // fetched_at is None → never fetched → Pending
                 (None, _, None) => (ItemValue::Pending, None),
-                // price is None but fetched_at exists → NoData
-                (None, _, Some(_)) => (ItemValue::NoData, None),
-                // edge: price None, is_stale irrelevant without fetched_at
-                _ => (ItemValue::Pending, None),
+                _ => (ItemValue::NoData, None),
             };
-
             ValuationItem {
                 printing_id: r.printing_id,
                 card_name: r.card_name,
@@ -165,18 +177,18 @@ async fn get_valuations(
         })
         .collect();
 
-    Ok(Json(GetValuationsResponse {
-        data,
-        total_usd: total,
-    }))
+    Ok(Json(GetValuationsResponse { data, total_usd: total }))
 }
 
 async fn trigger_refresh(
     State(state): State<AppState>,
-    // Auth required; workspace claim not used here since refresh is workspace-global
-    _claim: WorkspaceClaim,
+    _auth: AuthUser,
+    headers: HeaderMap,
     Query(params): Query<RefreshParams>,
-) -> Result<Json<RefreshResponse>, ApiError> {
+) -> Result<Json<RefreshResponse>, AppError> {
+    // Workspace auth check (ensure caller belongs to the workspace) is deferred to
+    // the full auth middleware; for now, require valid session via AuthUser.
+    let _workspace_id = workspace_from_headers_or_query(&headers, params.workspace_id)?;
     let svc = state.valuation_service();
 
     let refreshed = if let Some(printing_id) = params.printing_id {
@@ -191,9 +203,11 @@ async fn trigger_refresh(
 
 async fn get_history(
     State(state): State<AppState>,
-    _claim: WorkspaceClaim,
+    _auth: AuthUser,
+    headers: HeaderMap,
     Query(params): Query<HistoryParams>,
-) -> Result<Json<HistoryResponse>, ApiError> {
+) -> Result<Json<HistoryResponse>, AppError> {
+    let _workspace_id = workspace_from_headers_or_query(&headers, params.workspace_id)?;
     let svc = state.valuation_service();
     let limit = params.limit.unwrap_or(90).clamp(1, 365);
 
@@ -218,21 +232,30 @@ async fn get_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal::prelude::FromStr;
+    use axum::http::header::HeaderName;
+    use axum::http::HeaderValue;
 
     #[test]
-    fn item_value_stale_calculates_seconds() {
-        // Pure serialization / construction test (no DB or HTTP needed)
-        let fetched_at = Utc::now() - chrono::Duration::hours(30);
-        let stale_seconds = (Utc::now() - fetched_at).num_seconds();
-        assert!(stale_seconds >= 30 * 3600);
+    fn workspace_from_header_parses_uuid() {
+        let id = Uuid::new_v4();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-workspace-id"),
+            HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+        assert_eq!(workspace_from_headers_or_query(&headers, None).unwrap(), id);
     }
 
     #[test]
-    fn line_total_is_price_times_qty() {
-        let price = Decimal::from_str("5.25").unwrap();
-        let qty = 4;
-        let total = price * Decimal::from(qty);
-        assert_eq!(total, Decimal::from_str("21.00").unwrap());
+    fn workspace_from_query_param() {
+        let id = Uuid::new_v4();
+        let headers = HeaderMap::new();
+        assert_eq!(workspace_from_headers_or_query(&headers, Some(id)).unwrap(), id);
+    }
+
+    #[test]
+    fn workspace_missing_returns_bad_request() {
+        let headers = HeaderMap::new();
+        assert!(workspace_from_headers_or_query(&headers, None).is_err());
     }
 }

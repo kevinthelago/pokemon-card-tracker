@@ -13,6 +13,7 @@ pub mod inventory;
 pub mod items;
 pub mod routes;
 pub mod valuation;
+pub mod valuation_routes;
 
 use axum::{
     routing::{get, post},

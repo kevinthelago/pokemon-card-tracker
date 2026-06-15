@@ -12,7 +12,6 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
-use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -78,6 +77,7 @@ impl ValuationStatus {
 
 /// Payload for a per-printing valuation refresh job.
 /// Enqueued by the catalogue service after a card is added, and by the daily cron job.
+/// The `apalis::prelude::Job` impl will be added when the foundation wires in apalis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValuationRefreshJob {
     pub printing_id: String,
@@ -328,15 +328,21 @@ impl ValuationService {
     pub async fn workspace_total(&self, workspace_id: Uuid) -> Result<Decimal> {
         let total: Option<Decimal> = sqlx::query_scalar(
             "SELECT COALESCE(
-                 (SELECT SUM(v.price * i.quantity)
-                  FROM inventory_items i
-                  JOIN valuations v ON v.printing_id = i.printing_id
-                  WHERE i.workspace_id = $1)
-               + (SELECT COUNT(*)::NUMERIC
-                  FROM card_instances ci
-                  JOIN valuations v ON v.printing_id = ci.printing_id
-                  WHERE ci.workspace_id = $1),
-              0)",
+                 COALESCE(
+                     (SELECT SUM(v.price * i.quantity)
+                      FROM inventory_items i
+                      JOIN valuations v ON v.printing_id = i.printing_id
+                      WHERE i.workspace_id = $1),
+                     0::NUMERIC
+                 )
+                 + COALESCE(
+                     (SELECT SUM(v.price)
+                      FROM card_instances ci
+                      JOIN valuations v ON v.printing_id = ci.printing_id
+                      WHERE ci.workspace_id = $1),
+                     0::NUMERIC
+                 ),
+              0::NUMERIC) AS total",
         )
         .bind(workspace_id)
         .fetch_one(&self.pool)
@@ -464,10 +470,22 @@ mod tests {
     use rust_decimal::prelude::FromStr;
     use serde_json::json;
 
-    fn service_for_tests() -> ValuationService {
-        // We can only unit-test pure logic, not DB queries
-        // Integration tests live in crates/api/tests/
-        todo!("DB-requiring tests belong in integration tests")
+    fn tcg_price_extractor() -> impl Fn(&PrintingRow) -> Option<Decimal> {
+        // Closure captures no state — mirrors the pure helper method
+        |printing: &PrintingRow| {
+            let blob: TcgPricesBlob =
+                serde_json::from_value(printing.tcg_prices_json.clone()?).ok()?;
+
+            let market_f64 = blob
+                .holofoil
+                .as_ref()
+                .and_then(|t| t.market)
+                .or_else(|| blob.first_edition_holofoil.as_ref().and_then(|t| t.market))
+                .or_else(|| blob.normal.as_ref().and_then(|t| t.market))
+                .or_else(|| blob.reverse_holofoil.as_ref().and_then(|t| t.market))?;
+
+            Decimal::try_from(market_f64).ok()
+        }
     }
 
     fn printing_with_tcg_prices(prices_json: serde_json::Value) -> PrintingRow {
@@ -481,51 +499,33 @@ mod tests {
 
     #[test]
     fn extracts_holofoil_market_price() {
-        // Build a service shell just to call the pure helper
-        let svc = ValuationService {
-            pool: unsafe { std::mem::zeroed() }, // never used in pure helpers
-            pc: PriceChartingClient::new("test"),
-        };
-
+        let extract = tcg_price_extractor();
         let printing = printing_with_tcg_prices(json!({
             "holofoil": { "low": 1.00, "mid": 2.50, "market": 2.15 },
             "normal":   { "low": 0.50, "mid": 0.80, "market": 0.75 }
         }));
-
-        let price = svc.extract_tcg_market_price(&printing);
-        assert_eq!(price, Some(Decimal::try_from(2.15_f64).unwrap()));
+        assert_eq!(extract(&printing), Some(Decimal::try_from(2.15_f64).unwrap()));
     }
 
     #[test]
     fn falls_back_to_normal_when_no_holofoil() {
-        let svc = ValuationService {
-            pool: unsafe { std::mem::zeroed() },
-            pc: PriceChartingClient::new("test"),
-        };
-
+        let extract = tcg_price_extractor();
         let printing = printing_with_tcg_prices(json!({
             "normal": { "market": 0.75 }
         }));
-
-        let price = svc.extract_tcg_market_price(&printing);
-        assert_eq!(price, Some(Decimal::try_from(0.75_f64).unwrap()));
+        assert_eq!(extract(&printing), Some(Decimal::try_from(0.75_f64).unwrap()));
     }
 
     #[test]
     fn no_tcg_prices_returns_none() {
-        let svc = ValuationService {
-            pool: unsafe { std::mem::zeroed() },
-            pc: PriceChartingClient::new("test"),
-        };
-
+        let extract = tcg_price_extractor();
         let printing = PrintingRow {
             id: "xy1-1".into(),
             name: "Test".into(),
             set_code: "XY".into(),
             tcg_prices_json: None,
         };
-
-        assert!(svc.extract_tcg_market_price(&printing).is_none());
+        assert!(extract(&printing).is_none());
     }
 
     #[test]

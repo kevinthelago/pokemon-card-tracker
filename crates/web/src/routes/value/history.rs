@@ -1,13 +1,15 @@
-//! `/value/card/:printing_id/history` — per-card price-history chart.
+//! `/value/:printing_id/history` — per-card price-history chart (Leptos 0.7 CSR).
 //!
-//! Uses `leptos-chartistry` for the 90-day line sparkline.
-//! The chart is a client-side island (wasm); SSR renders a placeholder.
+//! Fetches historical snapshots from `GET /api/valuations/history?printing_id=<id>`,
+//! renders a sparkline SVG chart and a data table.
+//! (leptos-chartistry not yet wired; uses a hand-built SVG sparkline instead.)
 
-use chrono::{DateTime, Utc};
-use leptos::*;
-use leptos_router::*;
-use rust_decimal::Decimal;
+use leptos::prelude::*;
+use leptos_router::hooks::use_params_map;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::api;
 
 // ── Wire types ─────────────────────────────────────────────────────────────
 
@@ -19,95 +21,67 @@ pub struct HistoryResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryPoint {
-    pub price_usd: Decimal,
+    pub price_usd: f64,
     pub source: String,
-    /// RFC-3339 timestamp string (serde-friendly across SSR ↔ WASM boundary).
     pub captured_at: String,
 }
 
-// ── Server function ────────────────────────────────────────────────────────
+// ── API call ───────────────────────────────────────────────────────────────
 
-#[server(GetCardHistory, "/api/v1")]
-pub async fn get_card_history(
-    printing_id: String,
-    limit: Option<i64>,
-) -> Result<HistoryResponse, ServerFnError> {
-    #[cfg(feature = "ssr")]
-    {
-        let state = expect_context::<crate::server::state::AppState>();
-        let _claim = expect_context::<crate::server::auth::WorkspaceClaim>();
-
-        let svc = state.valuation_service();
-        let lim = limit.unwrap_or(90).clamp(1, 365);
-
-        let rows = svc
-            .history(&printing_id, lim)
-            .await
-            .map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-
-        let data = rows
-            .into_iter()
-            .map(|r| HistoryPoint {
-                price_usd: r.price,
-                source: r.source,
-                captured_at: r.captured_at.to_rfc3339(),
-            })
-            .collect();
-
-        Ok(HistoryResponse { printing_id, data })
-    }
-    #[cfg(not(feature = "ssr"))]
-    unreachable!()
+pub async fn fetch_history(
+    printing_id: &str,
+    workspace_id: Uuid,
+) -> Result<HistoryResponse, String> {
+    api::get_json(&format!(
+        "/valuations/history?printing_id={}&workspace_id={}&limit=90",
+        printing_id, workspace_id
+    ))
+    .await
 }
 
 // ── Page component ─────────────────────────────────────────────────────────
 
+/// Price-history page. Expects `:wid` and `:printing_id` in URL params.
 #[component]
 pub fn CardHistoryPage() -> impl IntoView {
     let params = use_params_map();
-    let printing_id =
-        move || params.with(|p| p.get("printing_id").cloned().unwrap_or_default());
+    let printing_id = move || params.with(|p| p.get("printing_id").unwrap_or_default());
+    let workspace_id = move || {
+        params.with(|p| p.get("wid").and_then(|s| Uuid::parse_str(s).ok()))
+    };
 
-    let history = create_resource(printing_id, |id| get_card_history(id, Some(90)));
+    let history = Resource::new(
+        move || (printing_id(), workspace_id()),
+        |(pid, wid)| async move {
+            let wid = wid?;
+            fetch_history(&pid, wid).await.ok()
+        },
+    );
 
     view! {
         <div class="p-6 space-y-6 max-w-4xl mx-auto">
             <nav class="text-sm">
-                <a href="/value" class="text-blue-500 hover:underline">"← Collection Value"</a>
+                <a href="javascript:history.back()" class="text-blue-500 hover:underline">
+                    "← Back"
+                </a>
             </nav>
+            <h1 class="text-2xl font-bold text-gray-900">"Price History"</h1>
 
             <Suspense fallback=move || view! { <ChartSkeleton /> }>
-                <ErrorBoundary fallback=|errors| view! {
-                    <div class="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
-                        <p class="font-semibold">"Failed to load price history"</p>
-                        <For each=move || errors.get() key=|(k, _)| k.clone()
-                            children=|(_, e)| view! { <p class="text-sm">{e.to_string()}</p> }
-                        />
-                    </div>
-                }>
-                    {move || history.get().map(|res| res.map(|data| view! {
-                        <div class="space-y-6">
-                            <div class="flex items-center justify-between">
-                                <h1 class="text-2xl font-bold text-gray-900">
-                                    "Price History"
-                                </h1>
-                                <p class="text-sm text-gray-400">
-                                    {format!("{} data points", data.data.len())}
-                                </p>
-                            </div>
-
-                            {if data.data.is_empty() {
-                                view! { <EmptyHistoryState printing_id=data.printing_id /> }.into_view()
-                            } else {
-                                let latest = data.data.first().cloned();
-                                view! {
-                                    <LatestValueBanner point=latest />
-                                    <PriceChart points=data.data />
-                                }.into_view()
-                            }}
+                {move || match history.get() {
+                    None => view! { <ChartSkeleton /> }.into_any(),
+                    Some(None) => view! {
+                        <div class="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
+                            <p class="font-semibold">"Failed to load price history"</p>
                         </div>
-                    }))}
-                </ErrorBoundary>
+                    }.into_any(),
+                    Some(Some(data)) if data.data.is_empty() => view! {
+                        <EmptyHistoryState />
+                    }.into_any(),
+                    Some(Some(data)) => view! {
+                        <PriceHistoryContent points=data.data printing_id=data.printing_id />
+                    }.into_any(),
+                }}
             </Suspense>
         </div>
     }
@@ -116,90 +90,126 @@ pub fn CardHistoryPage() -> impl IntoView {
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 #[component]
-fn LatestValueBanner(point: Option<HistoryPoint>) -> impl IntoView {
-    let Some(p) = point else {
-        return view! { <div></div> }.into_view();
-    };
-    view! {
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
-            <div>
-                <p class="text-xs text-gray-500">"Latest price"</p>
-                <p class="text-2xl font-bold text-green-600">
-                    {format!("${:.2}", p.price_usd)}
-                </p>
-            </div>
-            <div class="ml-auto text-right">
-                <p class="text-xs text-gray-400">"Source"</p>
-                <p class="text-sm font-medium">{p.source}</p>
-            </div>
-        </div>
-    }
-    .into_view()
-}
-
-/// Line chart of price over time using leptos-chartistry.
-#[component]
-fn PriceChart(points: Vec<HistoryPoint>) -> impl IntoView {
-    // Sort oldest → newest for the chart x-axis
+fn PriceHistoryContent(points: Vec<HistoryPoint>, printing_id: String) -> impl IntoView {
     let mut sorted = points.clone();
     sorted.sort_by(|a, b| a.captured_at.cmp(&b.captured_at));
 
-    // Convert Decimal → f64 for the chart library
-    let chart_data: Vec<(f64, f64)> = sorted
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let price: f64 = p.price_usd.try_into().unwrap_or(0.0);
-            (i as f64, price)
-        })
-        .collect();
-
-    // X-axis labels (date strings, sampled every N points for readability)
-    let x_labels: Vec<String> = sorted
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| i % (sorted.len().max(1) / 6).max(1) == 0)
-        .map(|(_, p)| p.captured_at[..10].to_string()) // "YYYY-MM-DD"
-        .collect();
+    let latest = sorted.last().cloned();
+    let min_price = sorted.iter().map(|p| p.price_usd).fold(f64::MAX, f64::min);
+    let max_price = sorted.iter().map(|p| p.price_usd).fold(f64::MIN, f64::max);
 
     view! {
-        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <h2 class="text-base font-semibold text-gray-700 mb-4">"90-Day Price Trend (USD)"</h2>
-            // leptos-chartistry Chart component
-            // API: Series::new maps data → y; x is index; line() adds a line series.
-            // Adjust if the leptos-chartistry API version differs.
-            <PriceChartInner data=chart_data x_labels />
+        <div class="space-y-4">
+            // Latest value banner
+            {latest.map(|p| view! {
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4
+                            flex items-center justify-between">
+                    <div>
+                        <p class="text-xs text-gray-500 uppercase tracking-wide">"Latest price"</p>
+                        <p class="text-3xl font-bold text-green-600">
+                            {format!("${:.2}", p.price_usd)}
+                        </p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xs text-gray-400">"Source"</p>
+                        <p class="text-sm font-medium text-gray-700">{p.source.clone()}</p>
+                        <p class="text-xs text-gray-400">{p.captured_at.chars().take(10).collect::<String>()}</p>
+                    </div>
+                </div>
+            })}
+
+            // SVG sparkline chart
+            <SparklineChart points=sorted.clone() min=min_price max=max_price />
+
+            // Data table
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="bg-gray-50 border-b text-left">
+                            <th class="px-4 py-2 font-semibold text-gray-600">"Date"</th>
+                            <th class="px-4 py-2 font-semibold text-gray-600 text-right">"Price"</th>
+                            <th class="px-4 py-2 font-semibold text-gray-600">"Source"</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-50">
+                        {sorted.iter().rev().map(|p| {
+                            let date = p.captured_at.chars().take(10).collect::<String>();
+                            let price_str = format!("${:.2}", p.price_usd);
+                            let src = p.source.clone();
+                            view! {
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-4 py-2 text-gray-500">{date}</td>
+                                    <td class="px-4 py-2 text-right font-mono">{price_str}</td>
+                                    <td class="px-4 py-2 text-gray-500">{src}</td>
+                                </tr>
+                            }
+                        }).collect::<Vec<_>>()}
+                    </tbody>
+                </table>
+            </div>
         </div>
     }
 }
 
-/// Inner component isolates the chart import for easy swap if the crate API changes.
+/// Hand-built SVG sparkline — no external chart library dependency.
+/// Uses a 600×120 viewBox; points normalized to the price range.
 #[component]
-fn PriceChartInner(data: Vec<(f64, f64)>, x_labels: Vec<String>) -> impl IntoView {
-    use leptos_chartistry::*;
+fn SparklineChart(points: Vec<HistoryPoint>, min: f64, max: f64) -> impl IntoView {
+    const W: f64 = 600.0;
+    const H: f64 = 120.0;
+    const PAD: f64 = 10.0;
 
-    let series = Series::new(|(_, y): &(f64, f64)| *y)
-        .line(Line::new(|(x, _): &(f64, f64)| *x).with_name("Price (USD)"));
+    let range = (max - min).max(0.01); // avoid division by zero for flat price
+    let n = points.len();
+
+    let path_d = if n < 2 {
+        String::new()
+    } else {
+        let mut parts = Vec::with_capacity(n);
+        for (i, p) in points.iter().enumerate() {
+            let x = PAD + (i as f64 / (n - 1) as f64) * (W - 2.0 * PAD);
+            let y = H - PAD - ((p.price_usd - min) / range) * (H - 2.0 * PAD);
+            parts.push(format!("{},{}", x, y));
+        }
+        format!("M {}", parts.join(" L "))
+    };
 
     view! {
-        <Chart
-            aspect_ratio=AspectRatio::from_outer_height(100.0, 280.0)
-            series
-            data
-        />
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">"90-Day Price Trend (USD)"</p>
+            <svg viewBox=format!("0 0 {} {}", W, H) class="w-full h-32"
+                 aria-label="Price history sparkline">
+                // Y-axis labels
+                <text x="4" y="14" class="text-xs fill-gray-400" font-size="9">
+                    {format!("${:.2}", max)}
+                </text>
+                <text x="4" y=format!("{}", H - 2.0) class="text-xs fill-gray-400" font-size="9">
+                    {format!("${:.2}", min)}
+                </text>
+                // Price line
+                {if path_d.is_empty() { None } else { Some(view! {
+                    <path d=path_d fill="none" stroke="#16a34a" stroke-width="2"
+                          stroke-linecap="round" stroke-linejoin="round" />
+                }) }}
+                // Data points
+                {points.iter().enumerate().map(|(i, p)| {
+                    let x = PAD + (i as f64 / (n - 1).max(1) as f64) * (W - 2.0 * PAD);
+                    let y = H - PAD - ((p.price_usd - min) / range) * (H - 2.0 * PAD);
+                    view! {
+                        <circle cx=x cy=y r="3" fill="#16a34a" />
+                    }
+                }).collect::<Vec<_>>()}
+            </svg>
+        </div>
     }
 }
 
 #[component]
-fn EmptyHistoryState(printing_id: String) -> impl IntoView {
+fn EmptyHistoryState() -> impl IntoView {
     view! {
-        <div class="text-center py-16 text-gray-400 bg-white rounded-xl border border-gray-100">
-            <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                      d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-            </svg>
-            <p class="mt-3 text-base font-medium text-gray-600">"No price history yet"</p>
-            <p class="mt-1 text-sm">
+        <div class="text-center py-16 bg-white rounded-xl border border-gray-100">
+            <p class="text-lg font-medium text-gray-600">"No price history yet"</p>
+            <p class="mt-1 text-sm text-gray-400">
                 "Price snapshots are recorded daily. Check back tomorrow."
             </p>
         </div>
@@ -210,8 +220,8 @@ fn EmptyHistoryState(printing_id: String) -> impl IntoView {
 fn ChartSkeleton() -> impl IntoView {
     view! {
         <div class="space-y-4 animate-pulse">
-            <div class="h-16 bg-gray-200 rounded-xl"></div>
-            <div class="h-64 bg-gray-200 rounded-xl"></div>
+            <div class="h-20 bg-gray-200 rounded-xl"></div>
+            <div class="h-40 bg-gray-200 rounded-xl"></div>
         </div>
     }
 }

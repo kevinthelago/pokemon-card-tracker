@@ -1,18 +1,23 @@
-//! `/value` — collection value overview: total widget, per-card value badges, refresh button.
+//! `/value` — collection value overview page (Leptos 0.7 CSR).
+//!
+//! Fetches workspace valuations from `GET /api/valuations?workspace_id=<wid>`,
+//! displays total collection value, a per-card table with value badges, and
+//! a "Refresh Prices" button.
 
-use chrono::{DateTime, Utc};
-use leptos::*;
-use rust_decimal::Decimal;
+use leptos::prelude::*;
+use leptos_router::hooks::use_params_map;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+use wasm_bindgen_futures::spawn_local;
 
-// ── Shared API shapes (mirrors valuation_routes.rs) ───────────────────────
-// These are duplicated here so the web crate compiles in WASM mode without
-// pulling in API-only dependencies. They must stay in sync with the API response.
+use crate::api;
+
+// ── Wire types (mirrors valuation_routes.rs JSON shapes) ──────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValuationsResponse {
     pub data: Vec<ValuationItem>,
-    pub total_usd: Decimal,
+    pub total_usd: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,174 +28,96 @@ pub struct ValuationItem {
     pub condition: String,
     pub quantity: i32,
     pub value: ItemValue,
-    pub line_total_usd: Option<Decimal>,
+    pub line_total_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ItemValue {
-    Current {
-        price_usd: Decimal,
-        source: String,
-        fetched_at: DateTime<Utc>,
-    },
-    Stale {
-        price_usd: Decimal,
-        source: String,
-        fetched_at: DateTime<Utc>,
-        stale_seconds: i64,
-    },
+    Current { price_usd: f64, source: String, fetched_at: String },
+    Stale { price_usd: f64, source: String, fetched_at: String, stale_seconds: i64 },
     NoData,
     Pending,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RefreshResponse {
-    refreshed: u32,
+// ── API calls ──────────────────────────────────────────────────────────────
+
+pub async fn fetch_valuations(workspace_id: Uuid) -> Result<ValuationsResponse, String> {
+    api::get_json(&format!("/valuations?workspace_id={}", workspace_id)).await
 }
 
-// ── Server functions ───────────────────────────────────────────────────────
-
-#[cfg(feature = "ssr")]
-use crate::server::state::AppState;
-
-#[server(GetValuations, "/api/v1")]
-pub async fn get_valuations() -> Result<ValuationsResponse, ServerFnError> {
-    #[cfg(feature = "ssr")]
-    {
-        use axum::extract::State;
-        let state = expect_context::<AppState>();
-        let claim = expect_context::<crate::server::auth::WorkspaceClaim>();
-
-        let svc = state.valuation_service();
-
-        let rows = svc
-            .workspace_valuations(claim.workspace_id)
-            .await
-            .map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-
-        let total = svc
-            .workspace_total(claim.workspace_id)
-            .await
-            .map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-
-        // Convert DB rows to wire shape
-        let data = rows
-            .into_iter()
-            .map(|r| {
-                let (value, line_total) = match (r.price, r.is_stale, r.fetched_at) {
-                    (Some(price), false, Some(fetched_at)) => (
-                        ItemValue::Current {
-                            price_usd: price,
-                            source: r.source.unwrap_or_default(),
-                            fetched_at,
-                        },
-                        Some(price * rust_decimal::Decimal::from(r.quantity)),
-                    ),
-                    (Some(price), true, Some(fetched_at)) => (
-                        ItemValue::Stale {
-                            price_usd: price,
-                            source: r.source.unwrap_or_default(),
-                            fetched_at,
-                            stale_seconds: (Utc::now() - fetched_at).num_seconds(),
-                        },
-                        Some(price * rust_decimal::Decimal::from(r.quantity)),
-                    ),
-                    (None, _, None) => (ItemValue::Pending, None),
-                    _ => (ItemValue::NoData, None),
-                };
-                ValuationItem {
-                    printing_id: r.printing_id,
-                    card_name: r.card_name,
-                    set_code: r.set_code,
-                    condition: r.condition,
-                    quantity: r.quantity,
-                    value,
-                    line_total_usd: line_total,
-                }
-            })
-            .collect();
-
-        Ok(ValuationsResponse { data, total_usd: total })
-    }
-    #[cfg(not(feature = "ssr"))]
-    unreachable!()
-}
-
-#[server(TriggerRefresh, "/api/v1")]
-pub async fn trigger_refresh(
-    printing_id: Option<String>,
-) -> Result<RefreshResponse, ServerFnError> {
-    #[cfg(feature = "ssr")]
-    {
-        let state = expect_context::<AppState>();
-        let svc = state.valuation_service();
-
-        let refreshed = if let Some(id) = printing_id {
-            svc.refresh(&id)
-                .await
-                .map_err(|e| ServerFnError::ServerError(e.to_string()))?;
-            1
-        } else {
-            svc.refresh_all()
-                .await
-                .map_err(|e| ServerFnError::ServerError(e.to_string()))?
-        };
-
-        Ok(RefreshResponse { refreshed })
-    }
-    #[cfg(not(feature = "ssr"))]
-    unreachable!()
+pub async fn post_refresh(workspace_id: Uuid) -> Result<(), String> {
+    api::post_void(&format!("/valuations/refresh?workspace_id={}", workspace_id)).await
 }
 
 // ── Page component ─────────────────────────────────────────────────────────
 
+/// The value overview page. Expects `:wid` param in the URL.
 #[component]
 pub fn ValuePage() -> impl IntoView {
-    let valuations = create_resource(|| (), |_| get_valuations());
-    let refresh_action = create_server_action::<TriggerRefresh>();
+    let params = use_params_map();
+    let workspace_id = move || {
+        params.with(|p| p.get("wid").and_then(|s| Uuid::parse_str(&s).ok()))
+    };
 
-    // Re-fetch after a successful refresh
-    create_effect(move |_| {
-        if refresh_action.value().get().is_some() {
-            valuations.refetch();
-        }
-    });
+    let (reload, set_reload) = signal(0u32);
+    let (refreshing, set_refreshing) = signal(false);
+    let (refresh_error, set_refresh_error) = signal(Option::<String>::None);
+
+    let valuations = Resource::new(
+        move || (workspace_id(), reload.get()),
+        |(wid, _)| async move {
+            let wid = wid?;
+            fetch_valuations(wid).await.ok()
+        },
+    );
+
+    let handle_refresh = move |_| {
+        let Some(wid) = workspace_id() else { return };
+        set_refreshing.set(true);
+        set_refresh_error.set(None);
+        spawn_local(async move {
+            match post_refresh(wid).await {
+                Ok(()) => set_reload.update(|n| *n += 1),
+                Err(e) => set_refresh_error.set(Some(e)),
+            }
+            set_refreshing.set(false);
+        });
+    };
 
     view! {
         <div class="p-6 space-y-6 max-w-6xl mx-auto">
             <div class="flex items-center justify-between">
                 <h1 class="text-2xl font-bold text-gray-900">"Collection Value"</h1>
-                <ActionForm action=refresh_action>
-                    <input type="hidden" name="printing_id" value="" />
+                <div class="flex items-center gap-3">
+                    {move || refresh_error.get().map(|e| view! {
+                        <span class="text-sm text-red-500">{e}</span>
+                    })}
                     <button
-                        type="submit"
-                        class="btn btn-primary btn-sm"
-                        disabled=move || refresh_action.pending().get()
+                        class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg
+                               hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled=move || refreshing.get()
+                        on:click=handle_refresh
                     >
-                        {move || if refresh_action.pending().get() {
-                            "Refreshing…"
-                        } else {
-                            "Refresh Prices"
-                        }}
+                        {move || if refreshing.get() { "Refreshing…" } else { "Refresh Prices" }}
                     </button>
-                </ActionForm>
+                </div>
             </div>
 
             <Suspense fallback=move || view! { <LoadingSkeleton /> }>
-                <ErrorBoundary fallback=|errors| view! {
-                    <div class="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
-                        <p class="font-semibold">"Failed to load valuations"</p>
-                        <For each=move || errors.get() key=|(k, _)| k.clone()
-                            children=|(_, e)| view! { <p class="text-sm">{e.to_string()}</p> }
-                        />
-                    </div>
-                }>
-                    {move || valuations.get().map(|res| res.map(|data| view! {
-                        <CollectionTotalWidget total=data.total_usd item_count=data.data.len() />
+                {move || match valuations.get() {
+                    None => view! { <LoadingSkeleton /> }.into_any(),
+                    Some(None) => view! {
+                        <div class="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
+                            <p class="font-semibold">"Failed to load valuations"</p>
+                            <p class="text-sm">"Ensure you are signed in and the workspace ID is valid."</p>
+                        </div>
+                    }.into_any(),
+                    Some(Some(data)) => view! {
+                        <CollectionTotalWidget total=data.total_usd count=data.data.len() />
                         <ValuationTable items=data.data />
-                    }))}
-                </ErrorBoundary>
+                    }.into_any(),
+                }}
             </Suspense>
         </div>
     }
@@ -199,7 +126,7 @@ pub fn ValuePage() -> impl IntoView {
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 #[component]
-fn CollectionTotalWidget(total: Decimal, item_count: usize) -> impl IntoView {
+fn CollectionTotalWidget(total: f64, count: usize) -> impl IntoView {
     view! {
         <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
             <p class="text-sm font-medium text-gray-500 uppercase tracking-wide">
@@ -209,8 +136,8 @@ fn CollectionTotalWidget(total: Decimal, item_count: usize) -> impl IntoView {
                 {format!("${:.2}", total)}
             </p>
             <p class="mt-1 text-xs text-gray-400">
-                {format!("USD · {} item{}", item_count, if item_count == 1 { "" } else { "s" })}
-                " · Market prices (TCGplayer / PriceCharting)"
+                {format!("USD · {} item{} · Market prices (TCGplayer / PriceCharting)",
+                    count, if count == 1 { "" } else { "s" })}
             </p>
         </div>
     }
@@ -223,12 +150,10 @@ fn ValuationTable(items: Vec<ValuationItem>) -> impl IntoView {
             <div class="text-center py-16 text-gray-400">
                 <p class="text-lg font-medium text-gray-600">"No cards in your collection"</p>
                 <p class="mt-1 text-sm">
-                    "Add cards through the "
-                    <a href="/catalogue/add" class="text-blue-500 hover:underline">"catalogue"</a>
-                    " to see their market values here."
+                    "Add cards through the catalogue to see their market values here."
                 </p>
             </div>
-        }.into_view();
+        }.into_any();
     }
 
     view! {
@@ -242,7 +167,7 @@ fn ValuationTable(items: Vec<ValuationItem>) -> impl IntoView {
                         <th class="px-4 py-3 font-semibold text-gray-600 text-right">"Qty"</th>
                         <th class="px-4 py-3 font-semibold text-gray-600 text-right">"Unit Price"</th>
                         <th class="px-4 py-3 font-semibold text-gray-600 text-right">"Line Total"</th>
-                        <th class="px-4 py-3 font-semibold text-gray-600">"Source"</th>
+                        <th class="px-4 py-3 font-semibold text-gray-600">"Status"</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-50">
@@ -254,40 +179,33 @@ fn ValuationTable(items: Vec<ValuationItem>) -> impl IntoView {
                 </tbody>
             </table>
         </div>
-    }
-    .into_view()
+    }.into_any()
 }
 
 #[component]
 fn ValuationRow(item: ValuationItem) -> impl IntoView {
-    let printing_id = item.printing_id.clone();
-    let history_href = format!("/value/card/{}/history", printing_id);
+    let history_href = format!("/value/{}/history", item.printing_id);
+    let card_name = item.card_name.clone();
 
-    let (unit_price, source_badge, line_total) = match &item.value {
+    let (unit_price, badge_html, line_total) = match &item.value {
         ItemValue::Current { price_usd, source, .. } => (
             format!("${:.2}", price_usd),
-            view! { <span class="badge badge-success text-xs">{source.clone()}</span> }.into_view(),
+            format!(r#"<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">{}</span>"#, source),
             item.line_total_usd.map(|t| format!("${:.2}", t)).unwrap_or_else(|| "—".into()),
         ),
         ItemValue::Stale { price_usd, source, .. } => (
             format!("${:.2}", price_usd),
-            view! {
-                <span class="badge badge-warning text-xs"
-                      title="Price data is stale — refresh to update">
-                    {source.clone()} " (stale)"
-                </span>
-            }
-            .into_view(),
+            format!(r#"<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800" title="Price data is stale">{} (stale)</span>"#, source),
             item.line_total_usd.map(|t| format!("${:.2}", t)).unwrap_or_else(|| "—".into()),
         ),
         ItemValue::NoData => (
             "—".into(),
-            view! { <span class="badge badge-ghost text-xs">"No market data"</span> }.into_view(),
+            r#"<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600">No market data</span>"#.into(),
             "—".into(),
         ),
         ItemValue::Pending => (
             "—".into(),
-            view! { <span class="badge badge-ghost text-xs">"Pending"</span> }.into_view(),
+            r#"<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-400">Pending</span>"#.into(),
             "—".into(),
         ),
     };
@@ -296,7 +214,7 @@ fn ValuationRow(item: ValuationItem) -> impl IntoView {
         <tr class="hover:bg-gray-50 transition-colors">
             <td class="px-4 py-3">
                 <a href=history_href class="font-medium text-blue-600 hover:underline">
-                    {item.card_name}
+                    {card_name}
                 </a>
             </td>
             <td class="px-4 py-3 text-gray-500">{item.set_code}</td>
@@ -304,7 +222,9 @@ fn ValuationRow(item: ValuationItem) -> impl IntoView {
             <td class="px-4 py-3 text-right tabular-nums">{item.quantity}</td>
             <td class="px-4 py-3 text-right font-mono tabular-nums">{unit_price}</td>
             <td class="px-4 py-3 text-right font-mono font-semibold tabular-nums">{line_total}</td>
-            <td class="px-4 py-3">{source_badge}</td>
+            <td class="px-4 py-3">
+                <span inner_html=badge_html></span>
+            </td>
         </tr>
     }
 }
