@@ -171,3 +171,33 @@ fn user_friendly_remove_error(raw: &str) -> String {
         format!("Failed to remove member: {raw}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_last_owner_gives_helpful_message() {
+        let msg = user_friendly_change_error("403: cannot downgrade the last owner");
+        assert!(msg.contains("only owner"));
+        assert!(msg.contains("Promote"));
+    }
+
+    #[test]
+    fn change_unknown_error_falls_through() {
+        let msg = user_friendly_change_error("HTTP 500: oops");
+        assert!(msg.starts_with("Failed to change role"));
+    }
+
+    #[test]
+    fn remove_last_owner_gives_helpful_message() {
+        let msg = user_friendly_remove_error("403: cannot remove the last owner");
+        assert!(msg.contains("last owner"));
+    }
+
+    #[test]
+    fn remove_unknown_error_falls_through() {
+        let msg = user_friendly_remove_error("HTTP 500: oops");
+        assert!(msg.starts_with("Failed to remove member"));
+    }
+}

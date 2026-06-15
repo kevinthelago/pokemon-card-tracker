@@ -117,3 +117,29 @@ fn user_friendly_error(raw: &str) -> String {
         format!("Failed to send invitation: {raw}")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_member_error_is_friendly() {
+        let msg = user_friendly_error("HTTP 409: already a member");
+        assert!(msg.contains("already a member"));
+        assert!(!msg.starts_with("Failed"));
+    }
+
+    #[test]
+    fn duplicate_invite_error_is_friendly() {
+        let msg = user_friendly_error("HTTP 409: pending invite already exists");
+        assert!(msg.contains("pending invitation"));
+        assert!(msg.contains("Resend"));
+    }
+
+    #[test]
+    fn unknown_error_falls_through() {
+        let msg = user_friendly_error("HTTP 500: server exploded");
+        assert!(msg.starts_with("Failed to send invitation"));
+        assert!(msg.contains("server exploded"));
+    }
+}

@@ -4,6 +4,7 @@ use axum::{
     http::request::Parts,
 };
 use lettre::{AsyncSmtpTransport, Tokio1Executor};
+use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{app::AppState, error::AppError};
@@ -13,6 +14,12 @@ use crate::{app::AppState, error::AppError};
 pub struct AuthUser {
     pub id: Uuid,
     pub email: String,
+}
+
+#[derive(FromRow)]
+struct AuthRow {
+    id: Uuid,
+    email: String,
 }
 
 #[async_trait]
@@ -33,15 +40,15 @@ where
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or(AppError::Unauthorized)?;
 
-        let row = sqlx::query!(
+        let row = sqlx::query_as::<_, AuthRow>(
             r#"
             SELECT u.id, u.email
             FROM sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token = $1 AND s.expires_at > NOW()
             "#,
-            token
         )
+        .bind(token)
         .fetch_optional(&app.pool)
         .await
         .map_err(AppError::from)?

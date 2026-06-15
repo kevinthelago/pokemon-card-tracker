@@ -3,6 +3,10 @@ name = "cardguard-api"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "cardguard_api"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cardguard-api"
 path = "src/main.rs"
@@ -21,6 +25,6 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
-lettre = { version = "0.11", features = ["tokio1-native-tls", "builder"] }
+lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 rand = "0.8"
 dotenvy = "0.15"

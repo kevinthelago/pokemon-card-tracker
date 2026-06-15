@@ -1,0 +1,12 @@
+# Workspace build configuration
+
+# Silence the "incompatible target" warning when checking the web crate on a
+# non-WASM host; developers should use `cargo check -p cardguard-api` for the
+# API gate and `trunk build` (which sets the target automatically) for the web.
+[build]
+# No default target override — each package must be checked on its correct target.
+
+[alias]
+# Convenient gate shortcuts
+check-api = "check --package cardguard-api"
+check-web = "check --package cardguard-web --target wasm32-unknown-unknown"

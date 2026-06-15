@@ -1,14 +1,8 @@
 use anyhow::Context;
+use cardguard_api::{app, auth};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-mod app;
-mod auth;
-mod db;
-mod error;
-mod models;
-mod workspace;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,8 +25,8 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to run migrations")?;
 
     let mailer = auth::build_mailer()?;
-    let base_url = std::env::var("APP_BASE_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".into());
+    let base_url =
+        std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
     let state = app::AppState { pool, mailer, base_url };
     let router = app::create_router(state);
