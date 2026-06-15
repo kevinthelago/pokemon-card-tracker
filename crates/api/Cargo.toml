@@ -38,7 +38,7 @@ time = "0.3"
 async-trait = { workspace = true }
 base64 = "0.22"
 csv = "1"
-rust_decimal = { version = "1", features = ["serde-with-str"] }
+rust_decimal = { workspace = true }
 aes-gcm = "0.10"
 hmac = "0.12"
 urlencoding = "2"
