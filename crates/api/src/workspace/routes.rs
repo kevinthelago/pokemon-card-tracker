@@ -2,10 +2,10 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, post},
     Json, Router,
 };
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -21,12 +21,36 @@ use crate::{
 
 use super::authz::AuthContext;
 
+#[derive(sqlx::FromRow)]
+struct WsListRow {
+    id: Uuid,
+    name: String,
+    kind: WorkspaceKind,
+    created_at: DateTime<Utc>,
+    role: MemberRole,
+}
+
+#[derive(sqlx::FromRow)]
+struct WsRoleRow {
+    kind: WorkspaceKind,
+    role: MemberRole,
+}
+
+#[derive(sqlx::FromRow)]
+struct MemberListRow {
+    user_id: Uuid,
+    email: String,
+    name: String,
+    role: MemberRole,
+    joined_at: DateTime<Utc>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/workspaces", get(list_workspaces).post(create_workspace))
         .route(
             "/workspaces/:id",
-            get(get_workspace).patch(update_workspace),
+            get(get_workspace),
         )
         .route("/workspaces/:id/activate", post(activate_workspace))
         .route("/workspaces/:id/members", get(list_members))
@@ -70,14 +94,14 @@ async fn list_workspaces(
     auth: AuthContext,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let rows = sqlx::query!(
-        r#"SELECT w.id, w.name, w.kind AS "kind: WorkspaceKind", w.created_at, wm.role AS "role: MemberRole"
+    let rows: Vec<WsListRow> = sqlx::query_as(
+        r#"SELECT w.id, w.name, w.kind, w.created_at, wm.role
            FROM workspaces w
            JOIN workspace_members wm ON wm.workspace_id = w.id
            WHERE wm.user_id = $1
            ORDER BY w.created_at ASC"#,
-        auth.user_id
     )
+    .bind(auth.user_id)
     .fetch_all(&state.pool)
     .await?;
 
@@ -100,7 +124,7 @@ async fn create_workspace(
     State(state): State<AppState>,
     Json(body): Json<CreateWorkspaceRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let name = body.name.trim();
+    let name = body.name.trim().to_owned();
     if name.is_empty() || name.len() > 100 {
         return Err(AppError::BadRequest(
             "workspace name must be 1–100 characters".into(),
@@ -109,21 +133,27 @@ async fn create_workspace(
 
     let id = Uuid::new_v4();
     let now = Utc::now();
+    let kind_str = match body.kind {
+        WorkspaceKind::Seller => "seller",
+        WorkspaceKind::Collector => "collector",
+    };
 
     let mut tx = state.pool.begin().await?;
-    sqlx::query!(
-        "INSERT INTO workspaces (id, name, kind, created_at) VALUES ($1,$2,$3,$4)",
-        id,
-        name,
-        body.kind as _,
-        now
+    sqlx::query(
+        "INSERT INTO workspaces (id, name, kind, created_at) VALUES ($1,$2,$3::workspace_kind,$4)",
     )
+    .bind(id)
+    .bind(&name)
+    .bind(kind_str)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES ($1,$2,'owner',$3)",
-        id, auth.user_id, now
     )
+    .bind(id)
+    .bind(auth.user_id)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -132,7 +162,7 @@ async fn create_workspace(
         StatusCode::CREATED,
         Json(WorkspaceDto {
             id,
-            name: name.to_owned(),
+            name,
             kind: body.kind,
             role: MemberRole::Owner,
             created_at: now,
@@ -145,13 +175,14 @@ async fn get_workspace(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let row = sqlx::query!(
-        r#"SELECT w.id, w.name, w.kind AS "kind: WorkspaceKind", w.created_at, wm.role AS "role: MemberRole"
+    let row: WsListRow = sqlx::query_as(
+        r#"SELECT w.id, w.name, w.kind, w.created_at, wm.role
            FROM workspaces w
            JOIN workspace_members wm ON wm.workspace_id = w.id
            WHERE w.id = $1 AND wm.user_id = $2"#,
-        id, auth.user_id
     )
+    .bind(id)
+    .bind(auth.user_id)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -165,48 +196,20 @@ async fn get_workspace(
     }))
 }
 
-async fn update_workspace(
-    auth: AuthContext,
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<UpdateWorkspaceRequest>,
-) -> Result<impl IntoResponse, AppError> {
-    if auth.workspace_id != id {
-        return Err(AppError::Forbidden(
-            "can only update active workspace".into(),
-        ));
-    }
-    auth.require_owner()?;
-
-    if let Some(name) = body.name {
-        let name = name.trim().to_owned();
-        if name.is_empty() || name.len() > 100 {
-            return Err(AppError::BadRequest(
-                "workspace name must be 1–100 characters".into(),
-            ));
-        }
-        sqlx::query!("UPDATE workspaces SET name = $1 WHERE id = $2", name, id)
-            .execute(&state.pool)
-            .await?;
-    }
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
 /// Re-issue a JWT for a different workspace the caller is a member of.
 async fn activate_workspace(
     auth: AuthContext,
     State(state): State<AppState>,
     Path(target_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let row = sqlx::query!(
-        r#"SELECT w.kind AS "kind: WorkspaceKind", wm.role AS "role: MemberRole"
+    let row: WsRoleRow = sqlx::query_as(
+        r#"SELECT w.kind, wm.role
            FROM workspaces w
            JOIN workspace_members wm ON wm.workspace_id = w.id
            WHERE w.id = $1 AND wm.user_id = $2"#,
-        target_id,
-        auth.user_id
     )
+    .bind(target_id)
+    .bind(auth.user_id)
     .fetch_optional(&state.pool)
     .await?
     .ok_or_else(|| AppError::Forbidden("not a member of that workspace".into()))?;
@@ -233,14 +236,14 @@ async fn list_members(
     if auth.workspace_id != id {
         return Err(AppError::Forbidden("not the active workspace".into()));
     }
-    let rows = sqlx::query!(
-        r#"SELECT u.id AS user_id, u.email, u.name, wm.role AS "role: MemberRole", wm.joined_at
+    let rows: Vec<MemberListRow> = sqlx::query_as(
+        r#"SELECT u.id AS user_id, u.email, u.name, wm.role, wm.joined_at
            FROM workspace_members wm
            JOIN users u ON u.id = wm.user_id
            WHERE wm.workspace_id = $1
            ORDER BY wm.joined_at ASC"#,
-        id
     )
+    .bind(id)
     .fetch_all(&state.pool)
     .await?;
 
@@ -269,20 +272,19 @@ async fn remove_member(
     auth.require_owner()?;
 
     // Enforce last-owner invariant
-    let is_only_owner = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1 AND role = 'owner'"#,
-        workspace_id
+    let count: Option<i64> = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1 AND role = 'owner'",
     )
+    .bind(workspace_id)
     .fetch_one(&state.pool)
-    .await?
-    .unwrap_or(0)
-        <= 1;
+    .await?;
+    let is_only_owner = count.unwrap_or(0) <= 1;
 
-    let target_role = sqlx::query_scalar!(
-        r#"SELECT role::text FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"#,
-        workspace_id,
-        target_uid
+    let target_role: Option<String> = sqlx::query_scalar(
+        "SELECT role::text FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
     )
+    .bind(workspace_id)
+    .bind(target_uid)
     .fetch_optional(&state.pool)
     .await?;
 
@@ -290,13 +292,11 @@ async fn remove_member(
         return Err(AppError::BadRequest("cannot remove the only owner".into()));
     }
 
-    sqlx::query!(
-        "DELETE FROM workspace_members WHERE user_id = $1 AND workspace_id = $2",
-        target_uid,
-        workspace_id
-    )
-    .execute(&state.pool)
-    .await?;
+    sqlx::query("DELETE FROM workspace_members WHERE user_id = $1 AND workspace_id = $2")
+        .bind(target_uid)
+        .bind(workspace_id)
+        .execute(&state.pool)
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }

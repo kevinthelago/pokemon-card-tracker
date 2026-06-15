@@ -1,4 +1,4 @@
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -19,6 +19,44 @@ use super::{
 pub const REFRESH_TOKEN_TTL_DAYS: i64 = 30;
 const EMAIL_VERIFY_TTL_HOURS: i64 = 24;
 const PASSWORD_RESET_TTL_HOURS: i64 = 1;
+
+// Local row structs — dynamic queries avoid compile-time DATABASE_URL requirement.
+#[derive(sqlx::FromRow)]
+struct WsRow {
+    id: Uuid,
+    kind: WorkspaceKind,
+    role: MemberRole,
+}
+
+#[derive(sqlx::FromRow)]
+struct RefreshTokenRow {
+    id: Uuid,
+    user_id: Uuid,
+    family_id: Uuid,
+    expires_at: DateTime<Utc>,
+    revoked_at: Option<DateTime<Utc>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UserRow {
+    id: Uuid,
+    email: String,
+    name: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct UserEmailRow {
+    id: Uuid,
+    email: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct TokenRow {
+    id: Uuid,
+    user_id: Uuid,
+    expires_at: DateTime<Utc>,
+    used_at: Option<DateTime<Utc>>,
+}
 
 pub fn jwt_secret() -> String {
     std::env::var("JWT_SECRET")
@@ -79,10 +117,11 @@ pub async fn register(
     validate_name(name)?;
     validate_password(password)?;
 
-    let exists = sqlx::query_scalar!("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", email)
-        .fetch_one(&state.pool)
-        .await?
-        .unwrap_or(false);
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)")
+            .bind(email)
+            .fetch_one(&state.pool)
+            .await?;
 
     if exists {
         return Err(AppError::Conflict("email already registered".into()));
@@ -96,40 +135,46 @@ pub async fn register(
 
     let mut tx = state.pool.begin().await?;
 
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO users (id, email, name, password_hash, created_at) VALUES ($1,$2,$3,$4,$5)",
-        user_id,
-        email,
-        name,
-        password_hash,
-        now
     )
+    .bind(user_id)
+    .bind(email)
+    .bind(name)
+    .bind(&password_hash)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO workspaces (id, name, kind, created_at) VALUES ($1,$2,'collector',$3)",
-        workspace_id,
-        workspace_name,
-        now
     )
+    .bind(workspace_id)
+    .bind(&workspace_name)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES ($1,$2,'owner',$3)",
-        workspace_id, user_id, now
     )
+    .bind(workspace_id)
+    .bind(user_id)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
 
     let raw_ev = generate_token();
     let ev_hash = token_hash(&raw_ev);
     let ev_expires = now + Duration::hours(EMAIL_VERIFY_TTL_HOURS);
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO email_verifications (id, user_id, token_hash, expires_at, created_at) VALUES ($1,$2,$3,$4,$5)",
-        Uuid::new_v4(), user_id, ev_hash, ev_expires, now
     )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(&ev_hash)
+    .bind(ev_expires)
+    .bind(now)
     .execute(&mut *tx)
     .await?;
 
@@ -169,11 +214,10 @@ pub async fn login(
     let email = email.to_lowercase();
     let email = email.trim();
 
-    let user: Option<DbUser> = sqlx::query_as!(
-        DbUser,
+    let user: Option<DbUser> = sqlx::query_as(
         "SELECT id, email, name, password_hash, email_verified_at, created_at FROM users WHERE email = $1",
-        email
     )
+    .bind(email)
     .fetch_optional(&state.pool)
     .await?;
 
@@ -188,28 +232,20 @@ pub async fn login(
 
     let user = user.unwrap();
 
-    let row = sqlx::query!(
-        r#"SELECT w.id, w.kind AS "kind: WorkspaceKind", wm.role AS "role: MemberRole"
+    let row: WsRow = sqlx::query_as(
+        r#"SELECT w.id, w.kind, wm.role
            FROM workspaces w
            JOIN workspace_members wm ON wm.workspace_id = w.id
            WHERE wm.user_id = $1
            ORDER BY CASE WHEN w.kind = 'collector' THEN 0 ELSE 1 END, w.created_at ASC
            LIMIT 1"#,
-        user.id
     )
+    .bind(user.id)
     .fetch_one(&state.pool)
     .await?;
 
-    let (access_token, refresh_token) = issue_tokens(
-        state,
-        user.id,
-        &user.email,
-        row.id,
-        row.kind,
-        row.role,
-        None,
-    )
-    .await?;
+    let (access_token, refresh_token) =
+        issue_tokens(state, user.id, &user.email, row.id, row.kind, row.role, None).await?;
 
     Ok(AuthResponse {
         access_token,
@@ -227,21 +263,21 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
     let h = token_hash(raw_token);
     let now = Utc::now();
 
-    let row = sqlx::query!(
+    let row: RefreshTokenRow = sqlx::query_as(
         "SELECT id, user_id, family_id, expires_at, revoked_at FROM refresh_tokens WHERE token_hash = $1",
-        h
     )
+    .bind(&h)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::Unauthorized)?;
 
     if row.revoked_at.is_some() {
         // Reuse detected — revoke entire family
-        sqlx::query!(
+        sqlx::query(
             "UPDATE refresh_tokens SET revoked_at = $1 WHERE family_id = $2 AND revoked_at IS NULL",
-            now,
-            row.family_id
         )
+        .bind(now)
+        .bind(row.family_id)
         .execute(&state.pool)
         .await?;
         return Err(AppError::Unauthorized);
@@ -251,43 +287,31 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
     }
 
     // Rotate: revoke old, issue new in same family
-    sqlx::query!(
-        "UPDATE refresh_tokens SET revoked_at = $1 WHERE id = $2",
-        now,
-        row.id
-    )
-    .execute(&state.pool)
-    .await?;
+    sqlx::query("UPDATE refresh_tokens SET revoked_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(row.id)
+        .execute(&state.pool)
+        .await?;
 
-    let user = sqlx::query!(
-        "SELECT id, email, name FROM users WHERE id = $1",
-        row.user_id
-    )
-    .fetch_one(&state.pool)
-    .await?;
+    let user: UserRow = sqlx::query_as("SELECT id, email, name FROM users WHERE id = $1")
+        .bind(row.user_id)
+        .fetch_one(&state.pool)
+        .await?;
 
-    let ws = sqlx::query!(
-        r#"SELECT w.id, w.kind AS "kind: WorkspaceKind", wm.role AS "role: MemberRole"
+    let ws: WsRow = sqlx::query_as(
+        r#"SELECT w.id, w.kind, wm.role
            FROM workspaces w
            JOIN workspace_members wm ON wm.workspace_id = w.id
            WHERE wm.user_id = $1
            ORDER BY CASE WHEN w.kind = 'collector' THEN 0 ELSE 1 END, w.created_at ASC
            LIMIT 1"#,
-        row.user_id
     )
+    .bind(row.user_id)
     .fetch_one(&state.pool)
     .await?;
 
-    let (access_token, refresh_token) = issue_tokens(
-        state,
-        user.id,
-        &user.email,
-        ws.id,
-        ws.kind,
-        ws.role,
-        Some(row.family_id),
-    )
-    .await?;
+    let (access_token, refresh_token) =
+        issue_tokens(state, user.id, &user.email, ws.id, ws.kind, ws.role, Some(row.family_id)).await?;
 
     Ok(AuthResponse {
         access_token,
@@ -303,10 +327,10 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
 
 pub async fn logout(state: &AppState, raw_token: &str) -> Result<(), AppError> {
     let h = token_hash(raw_token);
-    sqlx::query!(
+    sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL",
-        h
     )
+    .bind(&h)
     .execute(&state.pool)
     .await?;
     Ok(())
@@ -318,10 +342,10 @@ pub async fn verify_email(state: &AppState, raw_token: &str) -> Result<(), AppEr
     let h = token_hash(raw_token);
     let now = Utc::now();
 
-    let row = sqlx::query!(
+    let row: TokenRow = sqlx::query_as(
         "SELECT id, user_id, expires_at, used_at FROM email_verifications WHERE token_hash = $1",
-        h
     )
+    .bind(&h)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::BadRequest("invalid verification token".into()))?;
@@ -334,20 +358,16 @@ pub async fn verify_email(state: &AppState, raw_token: &str) -> Result<(), AppEr
     }
 
     let mut tx = state.pool.begin().await?;
-    sqlx::query!(
-        "UPDATE email_verifications SET used_at = $1 WHERE id = $2",
-        now,
-        row.id
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query!(
-        "UPDATE users SET email_verified_at = $1 WHERE id = $2",
-        now,
-        row.user_id
-    )
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("UPDATE email_verifications SET used_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(row.id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE users SET email_verified_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(row.user_id)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(())
 }
@@ -359,22 +379,29 @@ pub async fn request_password_reset(state: &AppState, email: &str) -> Result<(),
     let email = email.trim();
     let now = Utc::now();
 
-    let user = sqlx::query!("SELECT id, email FROM users WHERE email = $1", email)
-        .fetch_optional(&state.pool)
-        .await?;
+    let user: Option<UserEmailRow> =
+        sqlx::query_as("SELECT id, email FROM users WHERE email = $1")
+            .bind(email)
+            .fetch_optional(&state.pool)
+            .await?;
 
     if let Some(u) = user {
         let raw = generate_token();
         let h = token_hash(&raw);
         let expires_at = now + Duration::hours(PASSWORD_RESET_TTL_HOURS);
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO password_resets (id, user_id, token_hash, expires_at, created_at) VALUES ($1,$2,$3,$4,$5)",
-            Uuid::new_v4(), u.id, h, expires_at, now
         )
+        .bind(Uuid::new_v4())
+        .bind(u.id)
+        .bind(&h)
+        .bind(expires_at)
+        .bind(now)
         .execute(&state.pool)
         .await?;
         let reset_url = format!("{}/auth/reset-password?token={}", state.base_url, raw);
-        let _ = send_password_reset_email(&state.mailer, &email_from(), &u.email, &reset_url).await;
+        let _ =
+            send_password_reset_email(&state.mailer, &email_from(), &u.email, &reset_url).await;
     }
     Ok(())
 }
@@ -388,10 +415,10 @@ pub async fn confirm_password_reset(
     let h = token_hash(raw_token);
     let now = Utc::now();
 
-    let row = sqlx::query!(
+    let row: TokenRow = sqlx::query_as(
         "SELECT id, user_id, expires_at, used_at FROM password_resets WHERE token_hash = $1",
-        h
     )
+    .bind(&h)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::BadRequest("invalid reset token".into()))?;
@@ -405,25 +432,21 @@ pub async fn confirm_password_reset(
 
     let new_hash = hash_password(new_password)?;
     let mut tx = state.pool.begin().await?;
-    sqlx::query!(
-        "UPDATE users SET password_hash = $1 WHERE id = $2",
-        new_hash,
-        row.user_id
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query!(
-        "UPDATE password_resets SET used_at = $1 WHERE id = $2",
-        now,
-        row.id
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query!(
+    sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")
+        .bind(&new_hash)
+        .bind(row.user_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE password_resets SET used_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(row.id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
         "UPDATE refresh_tokens SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
-        now,
-        row.user_id
     )
+    .bind(now)
+    .bind(row.user_id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
@@ -459,10 +482,15 @@ async fn issue_tokens(
     let family = family_id.unwrap_or_else(Uuid::new_v4);
     let rt_expires = now + Duration::days(REFRESH_TOKEN_TTL_DAYS);
 
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, expires_at, created_at) VALUES ($1,$2,$3,$4,$5,$6)",
-        Uuid::new_v4(), user_id, rt_hash, family, rt_expires, now
     )
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .bind(&rt_hash)
+    .bind(family)
+    .bind(rt_expires)
+    .bind(now)
     .execute(&state.pool)
     .await?;
 
