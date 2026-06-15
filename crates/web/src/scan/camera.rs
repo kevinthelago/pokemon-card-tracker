@@ -66,10 +66,10 @@ where
     let on_result_scan = on_result.clone();
     Effect::new(move |_| {
         if camera_state.get() != CameraState::Active {
-            return None;
+            return;
         }
-        let video = video_ref_scan.get()?;
-        let canvas = canvas_ref_scan.get()?;
+        let Some(video) = video_ref_scan.get() else { return; };
+        let Some(canvas) = canvas_ref_scan.get() else { return; };
 
         let on_result_inner = on_result_scan.clone();
 
@@ -95,7 +95,6 @@ where
                 }
             }
         });
-        Some(())
     });
 
     let on_result_manual = on_result.clone();

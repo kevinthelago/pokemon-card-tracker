@@ -234,12 +234,9 @@ where
                             </ul>
                         }.into_any()
                     }
-                    Some(Err(e)) => {
-                        let e = e.clone();
-                        view! {
-                            <p class="error">"Error: "{e}</p>
-                        }.into_any()
-                    },
+                    Some(Err(e)) => view! {
+                        <p class="error">"Error: "{e.to_owned()}</p>
+                    }.into_any(),
                 }}
             </Suspense>
         </div>
