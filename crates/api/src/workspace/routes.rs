@@ -108,7 +108,7 @@ async fn create_workspace(
     let mut tx = state.pool.begin().await?;
     sqlx::query!(
         "INSERT INTO workspaces (id, name, kind, created_at) VALUES ($1,$2,$3,$4)",
-        id, name, body.kind as WorkspaceKind, now
+        id, name, body.kind as _, now
     )
     .execute(&mut *tx)
     .await?;

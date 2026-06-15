@@ -65,5 +65,6 @@ pub struct AuthResponse {
     pub refresh_token: String,
     pub user_id: Uuid,
     pub email: String,
+    pub name: String,
     pub workspace_id: Uuid,
 }

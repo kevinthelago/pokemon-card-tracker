@@ -138,7 +138,7 @@ pub async fn register(
     let (access_token, refresh_token) =
         issue_tokens(state, user_id, email, workspace_id, WorkspaceKind::Collector, MemberRole::Owner, None).await?;
 
-    Ok(AuthResponse { access_token, refresh_token, user_id, email: email.to_owned(), workspace_id })
+    Ok(AuthResponse { access_token, refresh_token, user_id, email: email.to_owned(), name: name.to_owned(), workspace_id })
 }
 
 // ─── Login ────────────────────────────────────────────────────────────────────
@@ -189,7 +189,8 @@ pub async fn login(
         access_token,
         refresh_token,
         user_id: user.id,
-        email: user.email,
+        email: user.email.clone(),
+        name: user.name,
         workspace_id: row.id,
     })
 }
@@ -230,7 +231,7 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
     .execute(&state.pool)
     .await?;
 
-    let user = sqlx::query!("SELECT id, email FROM users WHERE id = $1", row.user_id)
+    let user = sqlx::query!("SELECT id, email, name FROM users WHERE id = $1", row.user_id)
         .fetch_one(&state.pool)
         .await?;
 
@@ -253,7 +254,8 @@ pub async fn refresh(state: &AppState, raw_token: &str) -> Result<AuthResponse, 
         access_token,
         refresh_token,
         user_id: user.id,
-        email: user.email,
+        email: user.email.clone(),
+        name: user.name,
         workspace_id: ws.id,
     })
 }

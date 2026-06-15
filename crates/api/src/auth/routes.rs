@@ -44,6 +44,7 @@ async fn register(
             "access_token": resp.access_token,
             "user_id": resp.user_id,
             "email": resp.email,
+            "name": resp.name,
             "workspace_id": resp.workspace_id,
         })),
     ))
@@ -62,6 +63,7 @@ async fn login(
             "access_token": resp.access_token,
             "user_id": resp.user_id,
             "email": resp.email,
+            "name": resp.name,
             "workspace_id": resp.workspace_id,
         })),
     ))
@@ -87,6 +89,7 @@ async fn refresh(
             "access_token": resp.access_token,
             "user_id": resp.user_id,
             "email": resp.email,
+            "name": resp.name,
             "workspace_id": resp.workspace_id,
         })),
     ))
