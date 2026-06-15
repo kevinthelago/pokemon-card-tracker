@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -21,8 +23,6 @@ pub struct WorkspaceInvite {
 
 impl WorkspaceInvite {
     pub fn is_pending(&self) -> bool {
-        self.accepted_at.is_none()
-            && self.cancelled_at.is_none()
-            && self.expires_at > Utc::now()
+        self.accepted_at.is_none() && self.cancelled_at.is_none() && self.expires_at > Utc::now()
     }
 }

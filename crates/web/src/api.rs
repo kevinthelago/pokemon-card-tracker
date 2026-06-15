@@ -8,9 +8,10 @@ use crate::routes::reconcile::{
     DiscrepancyDto, MappingQueueDto, MappingWithBackfillDto, ReconciliationReportDto,
     ReportDetailDto,
 };
-use crate::routes::settings::team::{
-    ChangeRoleBody, InviteDto, SendInviteBody, TeamResponse,
-};
+use crate::routes::settings::team::{ChangeRoleBody, InviteDto, SendInviteBody, TeamResponse};
+use crate::routes::stolen::dispute::ReportDetails;
+use crate::routes::stolen::my_reports::ReportSummary;
+use crate::routes::stolen::queue::QueueReport;
 
 const API_BASE: &str = "/api";
 
@@ -178,4 +179,94 @@ pub async fn create_mapping(
 
 pub async fn delete_mapping(workspace_id: Uuid, mapping_id: Uuid) -> Result<(), String> {
     delete_req(&format!("/workspaces/{workspace_id}/pos/mapping/{mapping_id}")).await
+}
+
+// ─── Stolen-card API ─────────────────────────────────────────────────────────
+
+/// Submit a new community stolen-card report. Returns the created report ID.
+pub async fn submit_stolen_report(
+    grader: String,
+    cert_number: String,
+    evidence: Option<String>,
+    notes: Option<String>,
+) -> Result<String, String> {
+    #[derive(Serialize)]
+    struct Body {
+        grader: String,
+        cert_number: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evidence: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Created {
+        id: uuid::Uuid,
+    }
+
+    let created: Created = post_json(
+        "/stolen/reports",
+        &Body {
+            grader,
+            cert_number,
+            evidence,
+            notes,
+        },
+    )
+    .await?;
+    Ok(created.id.to_string())
+}
+
+pub async fn fetch_my_reports() -> Result<Vec<ReportSummary>, String> {
+    #[derive(serde::Deserialize)]
+    struct Page {
+        items: Vec<ReportSummary>,
+    }
+    let page: Page = get_json("/stolen/reports").await?;
+    Ok(page.items)
+}
+
+pub async fn fetch_stolen_report(id: String) -> Result<ReportDetails, String> {
+    get_json(&format!("/stolen/reports/{id}")).await
+}
+
+pub async fn fetch_moderator_queue() -> Result<Vec<QueueReport>, String> {
+    #[derive(serde::Deserialize)]
+    struct Page {
+        items: Vec<QueueReport>,
+    }
+    let page: Page = get_json("/stolen/queue").await?;
+    Ok(page.items)
+}
+
+pub async fn confirm_stolen_report(id: String, notes: Option<String>) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Body {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<String>,
+    }
+    post_json::<_, serde_json::Value>(&format!("/stolen/reports/{id}/confirm"), &Body { notes })
+        .await
+        .map(|_| ())
+}
+
+pub async fn reject_stolen_report(id: String, notes: Option<String>) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Body {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<String>,
+    }
+    post_json::<_, serde_json::Value>(&format!("/stolen/reports/{id}/reject"), &Body { notes })
+        .await
+        .map(|_| ())
+}
+
+pub async fn submit_dispute(id: String, reason: String) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Body {
+        reason: String,
+    }
+    post_json::<_, serde_json::Value>(&format!("/stolen/reports/{id}/dispute"), &Body { reason })
+        .await
+        .map(|_| ())
 }
