@@ -1,3 +1,4 @@
+pub mod catalogue;
 pub mod import;
 pub mod reconcile;
 pub mod risk;

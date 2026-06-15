@@ -8,6 +8,7 @@ use leptos_router::{
 use uuid::Uuid;
 
 use crate::routes::{
+    catalogue::add::AddCardPage,
     import::{ExportPage, ImportWizard},
     reconcile::{MappingQueuePage, ReconcileDashboard, ReconcileReportPage},
     risk::RiskDashboardPage,
@@ -48,6 +49,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/catalogue/:wid/import") view=ImportPage />
                 <Route path=path!("/catalogue/:wid/export") view=ExportRoute />
                 <Route path=path!("/workspaces/:wid/risk") view=RiskDashboardPage />
+                <Route path=path!("/catalogue/add") view=AddCardPage />
             </Routes>
         </Router>
     }

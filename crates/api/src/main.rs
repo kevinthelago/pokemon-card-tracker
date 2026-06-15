@@ -1,9 +1,13 @@
+use std::sync::Arc;
+
 use anyhow::Context;
 use axum::Extension;
-use cardguard_api::{app, auth, crypto::EncryptionKey, pos, NullPosProvider, PosProvider};
+use cardguard_api::{
+    app, auth, crypto::EncryptionKey, integrations::pokemontcg::PokemonTcgClient, pos,
+    NullPosProvider, PosProvider,
+};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -35,11 +39,14 @@ async fn main() -> anyhow::Result<()> {
     let encryption_key = EncryptionKey::from_hex(&encryption_key_hex)
         .context("ENCRYPTION_KEY must be 64 hex chars (32 bytes)")?;
 
+    let tcg_api_key = std::env::var("POKEMON_TCG_API_KEY").ok();
+    let tcg_client = Arc::new(PokemonTcgClient::new(tcg_api_key));
+
     let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
 
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = app::AppState { pool, mailer, base_url, encryption_key };
+    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client };
 
     let router = app::create_router()
         .merge(pos::reconcile::routes())

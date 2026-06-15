@@ -1,5 +1,18 @@
+//! Catalogue module.
+//!
+//! Streams and their files:
+//!   catalogue-a-card  → identity.rs, items.rs, routes.rs  (THIS stream)
+//!   manage-inventory  → inventory.rs  (fill crates/api/src/catalogue/inventory.rs)
+//!   track-values      → valuation.rs  (fill crates/api/src/catalogue/valuation.rs)
+//!   csv-import-export → csv_import.rs, csv_export.rs
+
 pub mod csv_export;
 pub mod csv_import;
+pub mod identity;
+pub mod inventory;
+pub mod items;
+pub mod routes;
+pub mod valuation;
 
 use axum::{
     routing::{get, post},
