@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::Extension;
 use cardguard_api::{
-    app, auth, crypto::EncryptionKey,
+    app, auth, catalogue, crypto::EncryptionKey,
     grading::GradingService,
     integrations::pokemontcg::PokemonTcgClient,
     pos, NullPosProvider, PosProvider,
@@ -44,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
     let tcg_api_key = std::env::var("POKEMON_TCG_API_KEY").ok();
     let tcg_client = Arc::new(PokemonTcgClient::new(tcg_api_key));
     let valuation = app::build_valuation_service(pool.clone());
+    catalogue::valuation::spawn_valuation_refresh_scheduler(Arc::clone(&valuation));
 
     let psa_api_key = std::env::var("PSA_API_KEY").ok();
     let grading = Arc::new(GradingService::new(pool.clone(), psa_api_key, 3600));
