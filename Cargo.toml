@@ -1,0 +1,85 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/domain",
+    "crates/api",
+    "crates/web",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8", features = ["multipart"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = { version = "0.5" }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "migrate"] }
+
+# Background jobs — apalis core; postgres backend lives in apalis-sql
+apalis = { version = "0.6", features = ["tracing"] }
+apalis-sql = { version = "0.6", features = ["postgres"] }
+
+# CSV parsing
+csv = "1"
+csv-async = { version = "1", features = ["tokio"] }
+
+# Multipart
+multer = "3"
+
+# Encoding / format
+encoding_rs = "0.8"
+
+# IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Configuration
+config = "0.14"
+
+# HTTP client (for Pokémon TCG API / grading lookups)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Password hashing
+argon2 = "0.5"
+
+# JWT
+jsonwebtoken = "9"
+
+# Leptos
+leptos = { version = "0.7", features = ["csr"] }
+leptos_meta = { version = "0.7" }
+leptos_router = { version = "0.7" }
+leptos_axum = { version = "0.7" }
+
+# Async utilities
+futures = "0.3"
+bytes = "1"
+
+# Temp files
+tempfile = "3"
+
+# Domain crate (intra-workspace)
+domain = { path = "crates/domain" }

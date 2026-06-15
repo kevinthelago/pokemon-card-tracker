@@ -1,0 +1,41 @@
+[package]
+name = "web"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "web"
+path = "src/main.rs"
+
+[dependencies]
+domain = { workspace = true }
+
+leptos = { workspace = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true }
+leptos_axum = { workspace = true }
+
+# leptos_axum 0.7 requires axum 0.7 — override the workspace axum 0.8
+axum = "0.7"
+tokio = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+reqwest = { workspace = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", features = ["File", "FileList", "FormData", "Headers", "Request", "RequestInit", "Response"], optional = true }
+gloo-net = { version = "0.6", features = ["http"], optional = true }
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+
+[features]
+csr = ["leptos/csr", "dep:console_error_panic_hook", "dep:wasm-bindgen", "dep:web-sys", "dep:gloo-net", "dep:gloo-timers"]
+ssr = ["leptos/ssr", "leptos_axum/default", "leptos_meta/ssr", "leptos_router/ssr"]
+default = ["ssr"]
