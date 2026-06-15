@@ -111,8 +111,9 @@ pub async fn store_result(
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO grading_verifications
             (card_instance_id, grader, cert_number, result_status,
-             result_grade, result_card_name, raw_response, verified_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             result_grade, result_card_name, result_set_name, result_year,
+             raw_response, verified_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          RETURNING id",
     )
     .bind(card_instance_id)
@@ -121,6 +122,8 @@ pub async fn store_result(
     .bind(outcome.result_status())
     .bind(outcome.grade())
     .bind(outcome.card_name())
+    .bind(outcome.set_name())
+    .bind(outcome.year())
     .bind(outcome.raw_response())
     .bind(Utc::now())
     .fetch_one(db)

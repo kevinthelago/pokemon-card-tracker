@@ -310,13 +310,13 @@ fn validate_cert_number(cert: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Fuzzy card name comparison — strips punctuation and compares case-insensitively.
-/// Returns `true` when names are close enough to be considered a match.
+/// Fuzzy card name comparison — replaces punctuation with spaces and compares
+/// case-insensitively, so "Pikachu-EX" matches "Pikachu EX".
 fn names_match(claimed: &str, returned: &str) -> bool {
     let normalize = |s: &str| {
         s.to_lowercase()
             .chars()
-            .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+            .map(|c| if c.is_alphanumeric() { c } else { ' ' })
             .collect::<String>()
             .split_whitespace()
             .collect::<Vec<_>>()

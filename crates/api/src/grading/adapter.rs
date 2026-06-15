@@ -78,6 +78,20 @@ impl VerifyOutcome {
         }
     }
 
+    pub fn set_name(&self) -> Option<&str> {
+        match self {
+            Self::Verified { set_name, .. } => set_name.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn year(&self) -> Option<&str> {
+        match self {
+            Self::Verified { year, .. } => year.as_deref(),
+            _ => None,
+        }
+    }
+
     pub fn raw_response(&self) -> Option<&serde_json::Value> {
         match self {
             Self::Verified { raw_response, .. } => raw_response.as_ref(),
