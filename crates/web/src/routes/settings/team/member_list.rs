@@ -81,7 +81,7 @@ fn MemberRow(
             wasm_bindgen_futures::spawn_local(async move {
                 let body = ChangeRoleBody { role: new_role };
                 match api::change_member_role(workspace_id, user_id, &body).await {
-                    Ok(_) => on_change.call(()),
+                    Ok(_) => on_change.run(()),
                     Err(e) => set_error.set(Some(user_friendly_change_error(&e))),
                 }
                 set_busy.set(false);
@@ -97,7 +97,7 @@ fn MemberRow(
             let on_change = on_change.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match api::remove_member(workspace_id, user_id).await {
-                    Ok(_) => on_change.call(()),
+                    Ok(_) => on_change.run(()),
                     Err(e) => set_error.set(Some(user_friendly_remove_error(&e))),
                 }
                 set_busy.set(false);

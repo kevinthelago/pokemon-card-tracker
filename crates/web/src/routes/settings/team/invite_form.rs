@@ -40,7 +40,7 @@ pub fn InviteForm(workspace_id: Uuid, on_sent: Callback<()>) -> impl IntoView {
                 Ok(_) => {
                     set_email.set(String::new());
                     set_role.set(MemberRole::Staff);
-                    on_sent.call(());
+                    on_sent.run(());
                 }
                 Err(e) => {
                     set_error.set(Some(user_friendly_error(&e)));
