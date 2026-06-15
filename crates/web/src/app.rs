@@ -18,10 +18,12 @@ use crate::routes::{
     },
     catalogue::add::AddCardPage,
     import::{ExportPage, ImportWizard},
+    inventory::{InventoryDetailPage, InventoryListPage},
     reconcile::{MappingQueuePage, ReconcileDashboard, ReconcileReportPage},
     risk::RiskDashboardPage,
     settings::{pos::PosSettingsPage, team::TeamPage},
     stolen::{DisputePage, ModeratorQueue, MyReports, ReportForm},
+    verify::VerifyPage,
 };
 
 #[component]
@@ -71,6 +73,9 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/catalogue/:wid/export") view=ExportRoute />
                 <Route path=path!("/workspaces/:wid/risk") view=RiskDashboardPage />
                 <Route path=path!("/catalogue/add") view=AddCardPage />
+                <Route path=path!("/verify") view=VerifyPage />
+                <Route path=path!("/workspaces/:wid/inventory") view=InventoryListPage />
+                <Route path=path!("/workspaces/:wid/inventory/:id") view=InventoryDetailPage />
             </Routes>
         </Router>
     }

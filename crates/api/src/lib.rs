@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod fraud;
+pub mod grading;
 pub mod integrations;
 pub mod jobs;
 pub mod models;

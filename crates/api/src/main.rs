@@ -3,8 +3,10 @@ use std::sync::Arc;
 use anyhow::Context;
 use axum::Extension;
 use cardguard_api::{
-    app, auth, crypto::EncryptionKey, integrations::pokemontcg::PokemonTcgClient, pos,
-    NullPosProvider, PosProvider,
+    app, auth, crypto::EncryptionKey,
+    grading::GradingService,
+    integrations::pokemontcg::PokemonTcgClient,
+    pos, NullPosProvider, PosProvider,
 };
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
@@ -42,11 +44,14 @@ async fn main() -> anyhow::Result<()> {
     let tcg_api_key = std::env::var("POKEMON_TCG_API_KEY").ok();
     let tcg_client = Arc::new(PokemonTcgClient::new(tcg_api_key));
 
+    let psa_api_key = std::env::var("PSA_API_KEY").ok();
+    let grading = Arc::new(GradingService::new(pool.clone(), psa_api_key, 3600));
+
     let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
 
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client };
+    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client, grading };
 
     let router = app::create_router()
         .merge(pos::reconcile::routes())

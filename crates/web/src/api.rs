@@ -419,3 +419,78 @@ pub async fn mark_notification_read(workspace_id: Uuid, notif_id: Uuid) -> Resul
     }
     Ok(())
 }
+
+// ─── Inventory API ───────────────────────────────────────────────────────────
+
+use crate::routes::inventory::{BulkOp, InventoryFilter, InventoryItem, InventoryPage, PatchRequest};
+
+pub async fn fetch_inventory(
+    workspace_id: Uuid,
+    filter: &InventoryFilter,
+    cursor: Option<&str>,
+) -> Result<InventoryPage, String> {
+    let mut url = format!("/workspaces/{workspace_id}/catalogue/items?limit=50");
+    if let Some(c) = cursor {
+        url.push_str(&format!("&cursor={c}"));
+    }
+    if let Some(s) = &filter.search {
+        url.push_str(&format!("&search={}", js_sys::encode_uri_component(s)));
+    }
+    if let Some(k) = &filter.kind {
+        url.push_str(&format!("&kind={k}"));
+    }
+    if let Some(sc) = &filter.set_code {
+        url.push_str(&format!("&set_code={sc}"));
+    }
+    if let Some(r) = &filter.rarity {
+        url.push_str(&format!("&rarity={r}"));
+    }
+    if let Some(c) = &filter.condition {
+        url.push_str(&format!("&condition={c}"));
+    }
+    if filter.risk_flagged {
+        url.push_str("&risk_flagged=true");
+    }
+    url.push_str(&format!("&sort={}&order={}", filter.sort, filter.order));
+    get_json(&url).await
+}
+
+pub async fn fetch_inventory_item(workspace_id: Uuid, id: Uuid) -> Result<InventoryItem, String> {
+    get_json(&format!("/workspaces/{workspace_id}/catalogue/items/{id}")).await
+}
+
+pub async fn patch_inventory_item(
+    workspace_id: Uuid,
+    id: Uuid,
+    req: &PatchRequest,
+) -> Result<InventoryItem, String> {
+    let resp = Request::patch(&format!("{API_BASE}/workspaces/{workspace_id}/catalogue/items/{id}"))
+        .json(req)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status() == 409 {
+        return Err("conflict".into());
+    }
+    if !resp.ok() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+    resp.json::<InventoryItem>().await.map_err(|e| e.to_string())
+}
+
+pub async fn delete_inventory_item(workspace_id: Uuid, id: Uuid) -> Result<(), String> {
+    delete_req(&format!("/workspaces/{workspace_id}/catalogue/items/{id}")).await
+}
+
+pub async fn bulk_inventory(workspace_id: Uuid, op: &BulkOp) -> Result<u64, String> {
+    #[derive(serde::Deserialize)]
+    struct BulkResult { affected: u64 }
+    let r: BulkResult = post_json(
+        &format!("/workspaces/{workspace_id}/catalogue/items/bulk"),
+        op,
+    )
+    .await?;
+    Ok(r.affected)
+}
