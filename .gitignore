@@ -1,0 +1,10 @@
+/target
+/dist
+**/*.env
+.env
+.env.local
+*.pem
+# CI / local gate output files
+check_output.txt
+test_output.txt
+web_test_output.txt

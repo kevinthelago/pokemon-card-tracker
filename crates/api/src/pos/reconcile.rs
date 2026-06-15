@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     routing::{get, post},
     Json, Router,
 };
@@ -11,10 +11,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
+    app::AppState,
     error::AppError,
     models::connection::PosConnection,
     pos::mapping::MappingService,
-    AppState,
 };
 
 // ─── POS provider abstraction (contract for connect-pos stream) ───────────────
@@ -359,7 +359,6 @@ impl ReconciliationService {
             mapped_skus.insert(row.pos_sku.clone());
 
             if row.catalogue_qty < 0 {
-                // Caught by ingest but record here too so it shows in the report.
                 Self::insert_discrepancy(
                     pool,
                     report_id,
@@ -387,7 +386,6 @@ impl ReconciliationService {
                         disc_count += 1;
                     }
                     None => {
-                        // Present in catalogue with a mapping but absent from POS inventory.
                         Self::insert_discrepancy(
                             pool,
                             report_id,
@@ -400,7 +398,7 @@ impl ReconciliationService {
                         .await?;
                         disc_count += 1;
                     }
-                    _ => {} // quantities match — no discrepancy
+                    _ => {}
                 }
             }
         }
@@ -494,7 +492,7 @@ impl ReconciliationService {
         .bind(workspace_id)
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| AppError::NotFound("POS connection not found".into()))?;
+        .ok_or(AppError::NotFound)?;
 
         if !conn.is_active {
             return Err(AppError::BadRequest(
@@ -527,7 +525,7 @@ impl ReconciliationService {
         .map_err(AppError::from)
     }
 
-    // ─── Public query helpers (used by web server functions) ─────────────────
+    // ─── Public query helpers (used by HTTP handlers) ─────────────────────────
 
     pub async fn get_report(pool: &PgPool, report_id: Uuid) -> Result<ReconciliationReport, AppError> {
         sqlx::query_as::<_, ReconciliationReport>(
@@ -536,7 +534,7 @@ impl ReconciliationService {
         .bind(report_id)
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| AppError::NotFound("Report not found".into()))
+        .ok_or(AppError::NotFound)
     }
 
     pub async fn list_reports(
@@ -617,7 +615,7 @@ impl ReconciliationService {
         .bind(notes)
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| AppError::NotFound("Discrepancy not found".into()))?;
+        .ok_or(AppError::NotFound)?;
 
         // Side-effects for resolutions that mutate catalogue quantity.
         if resolution == "accept_pos" {
@@ -729,24 +727,26 @@ pub struct ReportDetail {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/pos/sync", post(handle_sync_now))
-        .route("/pos/reconciliation", get(handle_list_reports))
-        .route("/pos/reconciliation/:report_id", get(handle_get_report))
+        .route("/workspaces/:wid/pos/sync", post(handle_sync_now))
+        .route("/workspaces/:wid/pos/reconciliation", get(handle_list_reports))
+        .route("/workspaces/:wid/pos/reconciliation/:report_id", get(handle_get_report))
         .route(
-            "/pos/reconciliation/:report_id/discrepancies/:disc_id/resolve",
+            "/workspaces/:wid/pos/reconciliation/:report_id/discrepancies/:disc_id/resolve",
             post(handle_resolve_discrepancy),
         )
 }
 
 async fn handle_sync_now(
     State(state): State<AppState>,
+    Path(wid): Path<Uuid>,
+    Extension(provider): Extension<Arc<dyn PosProvider>>,
     Json(req): Json<SyncRequest>,
 ) -> Result<Json<ReconciliationReport>, AppError> {
     let report = ReconciliationService::run_reconciliation(
         &state.pool,
-        state.workspace_id,
+        wid,
         req.connection_id,
-        Arc::clone(&state.pos_provider),
+        Arc::clone(&provider),
     )
     .await?;
     Ok(Json(report))
@@ -754,19 +754,22 @@ async fn handle_sync_now(
 
 async fn handle_list_reports(
     State(state): State<AppState>,
+    Path(wid): Path<Uuid>,
     Query(q): Query<ListReportsQuery>,
 ) -> Result<Json<Vec<ReconciliationReport>>, AppError> {
     let reports =
-        ReconciliationService::list_reports(&state.pool, state.workspace_id, q.connection_id)
-            .await?;
+        ReconciliationService::list_reports(&state.pool, wid, q.connection_id).await?;
     Ok(Json(reports))
 }
 
 async fn handle_get_report(
     State(state): State<AppState>,
-    Path(report_id): Path<Uuid>,
+    Path((wid, report_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<ReportDetail>, AppError> {
     let report = ReconciliationService::get_report(&state.pool, report_id).await?;
+    if report.workspace_id != wid {
+        return Err(AppError::NotFound);
+    }
     let discrepancies =
         ReconciliationService::get_discrepancies(&state.pool, report_id).await?;
     Ok(Json(ReportDetail { report, discrepancies }))
@@ -774,12 +777,12 @@ async fn handle_get_report(
 
 async fn handle_resolve_discrepancy(
     State(state): State<AppState>,
-    Path((_report_id, disc_id)): Path<(Uuid, Uuid)>,
+    Path((wid, _report_id, disc_id)): Path<(Uuid, Uuid, Uuid)>,
     Json(req): Json<ResolveRequest>,
 ) -> Result<Json<ReconciliationDiscrepancy>, AppError> {
     let disc = ReconciliationService::resolve_discrepancy(
         &state.pool,
-        state.workspace_id,
+        wid,
         disc_id,
         &req.resolution,
         req.notes.as_deref(),
@@ -791,7 +794,7 @@ async fn handle_resolve_discrepancy(
 // ─── Null provider (placeholder until connect-pos stream lands) ──────────────
 
 /// No-op POS provider. Returns empty data for every call.
-/// Used by binaries as a placeholder until the real provider is wired up.
+/// Used as a placeholder until the real provider is wired up.
 pub struct NullPosProvider;
 
 #[async_trait]

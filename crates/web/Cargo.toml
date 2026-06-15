@@ -1,33 +1,21 @@
 [package]
 name = "cardguard-web"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
 
-[features]
-default = ["ssr"]
-ssr = [
-    "leptos/ssr",
-    "leptos_meta/ssr",
-    "leptos_router/ssr",
-    "dep:leptos_axum",
-]
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-leptos = { version = "0.6", features = [] }
-leptos_meta = { version = "0.6", features = [] }
-leptos_router = { version = "0.6", features = [] }
-leptos_axum = { version = "0.6", optional = true }
-axum = "0.7"
-tokio = { workspace = true }
+leptos = { version = "0.7", features = ["csr"] }
+leptos_router = { version = "0.7" }
+leptos_meta = { version = "0.7" }
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { workspace = true, features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "serde", "js"] }
 chrono = { workspace = true }
-thiserror = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-cardguard-api = { path = "../api" }
-dotenvy = "0.15"
-async-trait = { workspace = true }
-sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+gloo-net = { version = "0.6", features = ["http"] }
+console_error_panic_hook = "0.1"
+web-sys = { version = "0.3", features = ["Window", "Location"] }

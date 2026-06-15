@@ -1,9 +1,13 @@
-use leptos::*;
-use leptos_meta::*;
-use leptos_router::*;
+use leptos::prelude::*;
+use leptos_meta::provide_meta_context;
+use leptos_router::{
+    components::{Route, Router, Routes},
+    path,
+};
 
-use crate::routes::reconcile::{
-    mapping::MappingQueuePage, mod_route::ReconcileDashboard, report::ReconcileReportPage,
+use crate::routes::{
+    reconcile::{MappingQueuePage, ReconcileDashboard, ReconcileReportPage},
+    settings::team::TeamPage,
 };
 
 #[component]
@@ -11,22 +15,13 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
 
     view! {
-        <Stylesheet id="leptos" href="/pkg/cardguard.css"/>
-        <Title text="CardGuard"/>
-
         <Router>
-            <nav class="nav">
-                <a href="/reconcile">"Reconcile"</a>
-                <a href="/reconcile/mapping">"SKU Mapping"</a>
-            </nav>
-            <main>
-                <Routes>
-                    <Route path="/reconcile" view=ReconcileDashboard/>
-                    <Route path="/reconcile/report/:report_id" view=ReconcileReportPage/>
-                    <Route path="/reconcile/mapping" view=MappingQueuePage/>
-                    <Route path="/" view=|| view! { <p>"Welcome to CardGuard"</p> }/>
-                </Routes>
-            </main>
+            <Routes fallback=|| view! { <p>"Page not found."</p> }>
+                <Route path=path!("/workspaces/:wid/reconcile") view=ReconcileDashboard />
+                <Route path=path!("/workspaces/:wid/reconcile/report/:rid") view=ReconcileReportPage />
+                <Route path=path!("/workspaces/:wid/reconcile/mapping") view=MappingQueuePage />
+                <Route path=path!("/settings/:wid/team") view=TeamPage />
+            </Routes>
         </Router>
     }
 }

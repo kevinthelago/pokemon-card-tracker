@@ -1,46 +1,50 @@
-use axum::{routing::get, Router};
-use cardguard_api::{pos, AppState, NullPosProvider};
+use anyhow::Context;
+use axum::Extension;
+use cardguard_api::{app, auth, pos, NullPosProvider, PosProvider};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    let database_url = std::env::var("DATABASE_URL")?;
+    let database_url = std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?;
     let pool = PgPoolOptions::new()
         .max_connections(10)
         .connect(&database_url)
-        .await?;
+        .await
+        .context("failed to connect to database")?;
 
-    sqlx::migrate!("../../migrations").run(&pool).await?;
+    sqlx::migrate!("../../migrations")
+        .run(&pool)
+        .await
+        .context("failed to run migrations")?;
 
-    let workspace_id = uuid::Uuid::parse_str(
-        &std::env::var("WORKSPACE_ID").unwrap_or_else(|_| uuid::Uuid::nil().to_string()),
-    )?;
+    let mailer = auth::build_mailer()?;
+    let base_url =
+        std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
-    let provider: Arc<dyn cardguard_api::PosProvider> = Arc::new(NullPosProvider);
+    let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
 
-    // Spawn scheduled reconciliation (hourly)
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = AppState {
-        pool,
-        workspace_id,
-        pos_provider: provider,
-    };
+    let state = app::AppState { pool, mailer, base_url };
 
-    let app = Router::new()
-        .route("/health", get(|| async { "ok" }))
+    let router = app::create_router()
         .merge(pos::reconcile::routes())
         .merge(pos::mapping::routes())
+        .layer(Extension(Arc::clone(&provider)))
         .with_state(state);
 
-    let addr: SocketAddr = "0.0.0.0:3001".parse()?;
-    tracing::info!("API listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into());
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    tracing::info!("listening on {addr}");
+    axum::serve(listener, router).await?;
     Ok(())
 }

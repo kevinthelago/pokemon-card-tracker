@@ -1,328 +1,280 @@
 pub mod mapping;
 pub mod report;
 
-// Re-export the dashboard under a path-compatible name so app.rs can import cleanly.
-pub mod mod_route {
-    pub use super::dashboard::ReconcileDashboard;
+pub use mapping::MappingQueuePage;
+pub use report::ReconcileReportPage;
+
+use leptos::prelude::*;
+use leptos_router::{components::A, hooks::use_params_map};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::api;
+
+// ─── DTOs (mirror API response shapes) ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReconciliationReportDto {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub report_date: String,
+    pub status: String,
+    pub discrepancy_count: i32,
+    pub unresolved_count: i32,
+    pub synced_at: Option<String>,
+    pub error_message: Option<String>,
 }
 
-mod dashboard {
-    use leptos::*;
-    use leptos_router::A;
-    use serde::{Deserialize, Serialize};
-    use uuid::Uuid;
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiscrepancyDto {
+    pub id: Uuid,
+    pub printing_id: Option<Uuid>,
+    pub pos_sku: String,
+    pub discrepancy_type: String,
+    pub catalogue_qty: Option<i32>,
+    pub pos_qty: Option<i32>,
+    pub resolution: String,
+    pub resolved_at: Option<String>,
+    pub notes: Option<String>,
+}
 
-    fn sf(e: impl std::fmt::Display) -> ServerFnError {
-        ServerFnError::ServerError(e.to_string())
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReportDetailDto {
+    pub report: ReconciliationReportDto,
+    pub discrepancies: Vec<DiscrepancyDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MappingDto {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub pos_sku: String,
+    pub printing_id: Uuid,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnmappedSkuDto {
+    pub id: Uuid,
+    pub connection_id: Uuid,
+    pub pos_sku: String,
+    pub pos_product_name: Option<String>,
+    pub last_seen_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MappingQueueDto {
+    pub mappings: Vec<MappingDto>,
+    pub unmapped: Vec<UnmappedSkuDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MappingWithBackfillDto {
+    pub mapping: MappingDto,
+    pub backfilled_lines: i64,
+}
+
+// ─── Dashboard helpers ────────────────────────────────────────────────────────
+
+fn status_badge_class(status: &str) -> &'static str {
+    match status {
+        "completed" => "badge badge-success",
+        "syncing" => "badge badge-info",
+        "failed" | "stale" => "badge badge-error",
+        _ => "badge badge-neutral",
     }
+}
 
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct DashboardSummary {
-        pub reports: Vec<ReportRow>,
-        pub unmapped_count: i64,
+fn overall_state_label(reports: &[ReconciliationReportDto], unmapped_count: usize) -> &'static str {
+    if reports.iter().any(|r| r.status == "syncing") {
+        return "Syncing\u{2026}";
     }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct ReportRow {
-        pub id: Uuid,
-        pub connection_id: Uuid,
-        pub connection_name: String,
-        pub report_date: String,
-        pub status: String,
-        pub discrepancy_count: i32,
-        pub unresolved_count: i32,
+    if reports.iter().any(|r| r.status == "failed" || r.status == "stale") {
+        return "Sync error / stale";
     }
+    if unmapped_count > 0 {
+        return "Unmapped SKUs pending";
+    }
+    let total_unresolved: i32 = reports.iter().map(|r| r.unresolved_count).sum();
+    if total_unresolved == 0 {
+        "All in sync"
+    } else {
+        "Has discrepancies"
+    }
+}
 
-    #[cfg(feature = "ssr")]
-    pub async fn fetch_dashboard(workspace_id: Uuid) -> Result<DashboardSummary, ServerFnError> {
-        use cardguard_api::ReconciliationService;
-        use leptos_axum::extract;
-        use sqlx::PgPool;
+fn state_label_class(label: &str) -> &'static str {
+    match label {
+        "All in sync" => "sync-state-badge state-ok",
+        "Syncing\u{2026}" => "sync-state-badge state-syncing",
+        "Sync error / stale" => "sync-state-badge state-error",
+        _ => "sync-state-badge state-warn",
+    }
+}
 
-        let pool = extract::<axum::Extension<PgPool>>()
-            .await
-            .map(|e| e.0)
-            .map_err(sf)?;
+// ─── ReconcileDashboard component ─────────────────────────────────────────────
 
-        let reports = ReconciliationService::list_reports(&pool, workspace_id, None)
-            .await
-            .map_err(sf)?;
-
-        let unmapped_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM unmapped_pos_skus u \
-             WHERE u.workspace_id = $1 \
-               AND NOT EXISTS (\
-                   SELECT 1 FROM pos_product_mappings m \
-                   WHERE m.connection_id = u.connection_id AND m.pos_sku = u.pos_sku\
-               )",
-        )
-        .bind(workspace_id)
-        .fetch_one(&pool)
-        .await
-        .map_err(sf)?;
-
-        let rows = reports
-            .into_iter()
-            .map(|r| ReportRow {
-                id: r.id,
-                connection_id: r.connection_id,
-                connection_name: r.connection_id.to_string(), // connect-pos stream enriches this
-                report_date: r.report_date.to_string(),
-                status: r.status,
-                discrepancy_count: r.discrepancy_count,
-                unresolved_count: r.unresolved_count,
-            })
-            .collect();
-
-        Ok(DashboardSummary {
-            reports: rows,
-            unmapped_count,
+#[component]
+pub fn ReconcileDashboard() -> impl IntoView {
+    let params = use_params_map();
+    let workspace_id = move || {
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .unwrap_or_default()
         })
-    }
+    };
 
-    #[server(GetDashboard, "/api")]
-    pub async fn get_dashboard(workspace_id: String) -> Result<DashboardSummary, ServerFnError> {
-        #[cfg(feature = "ssr")]
-        {
-            let wid = Uuid::parse_str(&workspace_id).map_err(|_| sf("Invalid workspace ID"))?;
-            fetch_dashboard(wid).await
-        }
-        #[cfg(not(feature = "ssr"))]
-        {
-            Err(sf("SSR only"))
-        }
-    }
+    let (reload, set_reload) = signal(0u32);
 
-    // use_context is synchronous (no await) so the future of do_trigger_sync has
-    // zero suspend points — trivially Send. leptos_axum::extract for dyn-trait types
-    // trips Leptos 0.6's HRTB Send check, use_context avoids that entirely.
-    #[cfg(feature = "ssr")]
-    async fn do_trigger_sync(wid: Uuid, cid: Uuid) -> Result<String, ServerFnError> {
-        use cardguard_api::ReconciliationService;
+    let reports = LocalResource::new(move || {
+        let wid = workspace_id();
+        let _ = reload.get();
+        async move { api::fetch_reconcile_reports(wid).await.ok().unwrap_or_default() }
+    });
 
-        let pool = leptos::use_context::<sqlx::PgPool>()
-            .ok_or_else(|| sf("DB pool not in context"))?;
+    let mapping_queue = LocalResource::new(move || {
+        let wid = workspace_id();
+        let _ = reload.get();
+        async move { api::fetch_mapping_queue(wid).await.ok() }
+    });
 
-        let provider =
-            leptos::use_context::<std::sync::Arc<dyn cardguard_api::PosProvider>>()
-                .ok_or_else(|| sf("POS provider not in context"))?;
+    let (sync_error, set_sync_error) = signal(Option::<String>::None);
+    let (sync_pending, set_sync_pending) = signal(false);
 
-        tokio::task::spawn(async move {
-            if let Err(e) =
-                ReconciliationService::run_reconciliation(&pool, wid, cid, provider).await
-            {
-                tracing::error!(error = %e, "Background reconciliation failed");
+    let do_sync = move |connection_id: Uuid| {
+        let wid = workspace_id();
+        set_sync_pending.set(true);
+        set_sync_error.set(None);
+        wasm_bindgen_futures::spawn_local(async move {
+            match api::trigger_sync(wid, connection_id).await {
+                Ok(_) => set_reload.update(|n| *n += 1),
+                Err(e) => set_sync_error.set(Some(e)),
             }
+            set_sync_pending.set(false);
         });
+    };
 
-        Ok("queued".to_string())
-    }
+    view! {
+        <div class="reconcile-dashboard">
+            <div class="dashboard-header">
+                <h1>"Inventory Reconciliation"</h1>
 
-    #[server(TriggerSync, "/api")]
-    pub async fn trigger_sync(
-        workspace_id: String,
-        connection_id: String,
-    ) -> Result<String, ServerFnError> {
-        #[cfg(feature = "ssr")]
-        {
-            let wid = Uuid::parse_str(&workspace_id)
-                .map_err(|_| sf("Invalid workspace ID"))?;
-            let cid = Uuid::parse_str(&connection_id)
-                .map_err(|_| sf("Invalid connection ID"))?;
-            do_trigger_sync(wid, cid).await
-        }
-        #[cfg(not(feature = "ssr"))]
-        {
-            Err(sf("SSR only"))
-        }
-    }
-
-    fn status_badge(status: &str) -> &'static str {
-        match status {
-            "completed" => "badge-success",
-            "syncing" => "badge-info",
-            "failed" | "stale" => "badge-error",
-            _ => "badge-neutral",
-        }
-    }
-
-    fn sync_state_label(summary: &DashboardSummary) -> &'static str {
-        if summary.reports.iter().any(|r| r.status == "syncing") {
-            return "Syncing…";
-        }
-        if summary.reports.iter().any(|r| r.status == "failed" || r.status == "stale") {
-            return "Sync error / stale";
-        }
-        if summary.unmapped_count > 0 {
-            return "Unmapped SKUs pending";
-        }
-        let total_unresolved: i32 = summary.reports.iter().map(|r| r.unresolved_count).sum();
-        if total_unresolved == 0 {
-            "All in sync"
-        } else {
-            "Has discrepancies"
-        }
-    }
-
-    #[component]
-    pub fn ReconcileDashboard() -> impl IntoView {
-        // &'static str is Copy — safely captured by any number of closures.
-        // In production this comes from the auth/session context.
-        const WID: &str = "00000000-0000-0000-0000-000000000000";
-
-        let summary = create_resource(
-            move || WID.to_string(),
-            |wid| async move { get_dashboard(wid).await },
-        );
-
-        let sync_action = create_action(|(wid, cid): &(String, String)| {
-            let wid = wid.clone();
-            let cid = cid.clone();
-            async move { trigger_sync(wid, cid).await }
-        });
-
-        view! {
-            <div class="reconcile-dashboard">
-                <div class="dashboard-header">
-                    <h1>"Inventory Reconciliation"</h1>
-                    <Suspense fallback=|| view! { <span class="badge">"Loading…"</span> }>
-                        {move || {
-                            summary.get().map(|res| match res {
-                                Ok(s) => {
-                                    let label = sync_state_label(&s);
-                                    let cls = match label {
-                                        "All in sync" => "sync-state-badge state-ok",
-                                        "Syncing…" => "sync-state-badge state-syncing",
-                                        "Sync error / stale" => "sync-state-badge state-error",
-                                        _ => "sync-state-badge state-warn",
-                                    };
-                                    view! { <span class=cls>{label}</span> }.into_view()
-                                }
-                                Err(e) => view! { <span class="state-error">{e.to_string()}</span> }.into_view(),
-                            })
-                        }}
-                    </Suspense>
-                </div>
-
-                <Suspense fallback=|| view! { <p>"Loading reports…"</p> }>
+                <Suspense fallback=|| view! { <span class="badge">"Loading\u{2026}"</span> }>
                     {move || {
-                        summary.get().map(|res| match res {
-                            Err(e) => view! {
-                                <div class="error-banner">
-                                    <p>"Failed to load dashboard: " {e.to_string()}</p>
-                                </div>
-                            }.into_view(),
-                            Ok(s) => {
-                                let unmapped = s.unmapped_count;
-                                let reports = s.reports.clone();
-                                let is_empty = reports.is_empty();
+                        let rpts = reports.get();
+                        let queue = mapping_queue.get();
+                        match (rpts, queue) {
+                            (Some(rpts), Some(queue)) => {
+                                let unmapped_count = queue.as_ref().map(|q| q.unmapped.len()).unwrap_or(0);
+                                let label = overall_state_label(&rpts, unmapped_count);
                                 view! {
-                                    <div>
-                                        {if unmapped > 0 {
-                                            view! {
-                                                <div class="unmapped-alert">
-                                                    <span class="badge badge-warn">
-                                                        {format!("{} unmapped SKU{}", unmapped, if unmapped == 1 { "" } else { "s" })}
-                                                    </span>
-                                                    <A href="/reconcile/mapping">" → Map them now"</A>
-                                                </div>
-                                            }.into_view()
-                                        } else {
-                                            view! { <span/> }.into_view()
-                                        }}
-
-                                        {if is_empty {
-                                            view! {
-                                                <p class="empty-state">
-                                                    "No reconciliation reports yet. Connect a POS and run a sync to get started."
-                                                </p>
-                                            }.into_view()
-                                        } else {
-                                            view! {
-                                                <table class="report-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>"Date"</th>
-                                                            <th>"Connection"</th>
-                                                            <th>"Status"</th>
-                                                            <th>"Discrepancies"</th>
-                                                            <th>"Unresolved"</th>
-                                                            <th></th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        <For
-                                                            each=move || reports.clone()
-                                                            key=|r| r.id
-                                                            children=move |row| {
-                                                                let report_id = row.id.to_string();
-                                                                let href = format!("/reconcile/report/{}", report_id);
-                                                                let badge = status_badge(&row.status);
-                                                                let conn_id = row.connection_id.to_string();
-                                                                let date = row.report_date.clone();
-                                                                let conn_name = row.connection_name.clone();
-                                                                let status = row.status.clone();
-                                                                let disc_count = row.discrepancy_count;
-                                                                let unresolved = row.unresolved_count;
-                                                                view! {
-                                                                    <tr>
-                                                                        <td>{date}</td>
-                                                                        <td>{conn_name}</td>
-                                                                        <td>
-                                                                            <span class=format!("badge {}", badge)>
-                                                                                {status}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td>{disc_count}</td>
-                                                                        <td>
-                                                                            <span class=if unresolved == 0 { "resolved" } else { "unresolved" }>
-                                                                                {unresolved}
-                                                                            </span>
-                                                                        </td>
-                                                                        <td class="actions-cell">
-                                                                            <A href=href>"View →"</A>
-                                                                            <button
-                                                                                class="btn btn-xs btn-ghost"
-                                                                                on:click=move |_| {
-                                                                                    sync_action.dispatch((
-                                                                                        WID.to_string(),
-                                                                                        conn_id.clone(),
-                                                                                    ));
-                                                                                }
-                                                                            >
-                                                                                "Sync Now"
-                                                                            </button>
-                                                                        </td>
-                                                                    </tr>
-                                                                }
-                                                            }
-                                                        />
-                                                    </tbody>
-                                                </table>
-                                            }.into_view()
-                                        }}
-                                    </div>
-                                }.into_view()
+                                    <span class=state_label_class(label)>{label}</span>
+                                }.into_any()
                             }
-                        })
+                            _ => view! { <span class="badge">"Loading\u{2026}"</span> }.into_any(),
+                        }
                     }}
                 </Suspense>
+            </div>
 
+            <Suspense fallback=|| view! { <p>"Loading reports\u{2026}"</p> }>
                 {move || {
-                    if let Some(result) = sync_action.value().get() {
-                        match result {
-                            Ok(status) => view! {
-                                <p class="sync-result">{format!("Sync complete: {}", status)}</p>
-                            }.into_view(),
-                            Err(e) => view! {
-                                <p class="error">{format!("Sync failed: {}", e)}</p>
-                            }.into_view(),
+                    let rpts = reports.get();
+                    let queue = mapping_queue.get();
+                    match (rpts, queue) {
+                        (None, _) | (_, None) => view! {
+                            <p>"Loading\u{2026}"</p>
+                        }.into_any(),
+                        (Some(rpts), Some(queue)) => {
+                            let unmapped_count = queue.as_ref().map(|q| q.unmapped.len()).unwrap_or(0);
+                            let mapping_href = format!("/workspaces/{}/reconcile/mapping", workspace_id());
+                            let is_empty = rpts.is_empty();
+                            let rpts_clone = (*rpts).clone();
+                            view! {
+                                <div>
+                                    {if unmapped_count > 0 {
+                                        view! {
+                                            <div class="unmapped-alert">
+                                                <span class="badge badge-warn">
+                                                    {format!("{} unmapped SKU{}", unmapped_count, if unmapped_count == 1 { "" } else { "s" })}
+                                                </span>
+                                                <A href=mapping_href>" \u{2192} Map them now"</A>
+                                            </div>
+                                        }.into_any()
+                                    } else {
+                                        view! { <span /> }.into_any()
+                                    }}
+
+                                    {if is_empty {
+                                        view! {
+                                            <p class="empty-state">
+                                                "No reconciliation reports yet. Connect a POS and run a sync to get started."
+                                            </p>
+                                        }.into_any()
+                                    } else {
+                                        view! {
+                                            <table class="report-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>"Date"</th>
+                                                        <th>"Connection"</th>
+                                                        <th>"Status"</th>
+                                                        <th>"Discrepancies"</th>
+                                                        <th>"Unresolved"</th>
+                                                        <th></th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {rpts_clone.into_iter().map(|row| {
+                                                        let wid = workspace_id();
+                                                        let href = format!("/workspaces/{}/reconcile/report/{}", wid, row.id);
+                                                        let badge = status_badge_class(&row.status);
+                                                        let conn_id = row.connection_id;
+                                                        let do_sync_clone = do_sync.clone();
+                                                        view! {
+                                                            <tr>
+                                                                <td>{row.report_date.clone()}</td>
+                                                                <td class="mono">{row.connection_id.to_string()}</td>
+                                                                <td>
+                                                                    <span class=badge>{row.status.clone()}</span>
+                                                                </td>
+                                                                <td>{row.discrepancy_count}</td>
+                                                                <td>
+                                                                    <span class=if row.unresolved_count == 0 { "resolved" } else { "unresolved" }>
+                                                                        {row.unresolved_count}
+                                                                    </span>
+                                                                </td>
+                                                                <td class="actions-cell">
+                                                                    <A href=href>"View \u{2192}"</A>
+                                                                    <button
+                                                                        class="btn btn-xs btn-ghost"
+                                                                        disabled=move || sync_pending.get()
+                                                                        on:click=move |_| do_sync_clone(conn_id)
+                                                                    >
+                                                                        "Sync Now"
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        }
+                                                    }).collect_view()}
+                                                </tbody>
+                                            </table>
+                                        }.into_any()
+                                    }}
+                                </div>
+                            }.into_any()
                         }
-                    } else {
-                        view! { <span/> }.into_view()
                     }
                 }}
-            </div>
-        }
+            </Suspense>
+
+            {move || {
+                sync_error.get().map(|e| view! {
+                    <div class="toast toast-error">"Sync failed: " {e}</div>
+                })
+            }}
+        </div>
     }
 }

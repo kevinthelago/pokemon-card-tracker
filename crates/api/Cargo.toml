@@ -1,24 +1,31 @@
 [package]
 name = "cardguard-api"
-version.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "cardguard_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cardguard-api"
+path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }
 tokio = { workspace = true }
-sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sqlx = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
-thiserror = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["trace", "cors"] }
-async-trait = { workspace = true }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
+lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls", "builder"] }
+rand = "0.8"
 dotenvy = "0.15"
-
-[dev-dependencies]
-tokio = { workspace = true }
+async-trait = { workspace = true }

@@ -1,153 +1,11 @@
-use leptos::*;
-use leptos_router::{use_params_map, A};
-use serde::{Deserialize, Serialize};
+use leptos::prelude::*;
+use leptos_router::{components::A, hooks::use_params_map};
 use uuid::Uuid;
 
-fn sf(e: impl std::fmt::Display) -> ServerFnError {
-    ServerFnError::ServerError(e.to_string())
-}
+use crate::api;
+use super::{DiscrepancyDto, ReportDetailDto};
 
-// ─── Shared types (mirrored from cardguard-api) ───────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReportView {
-    pub id: Uuid,
-    pub connection_id: Uuid,
-    pub report_date: String,
-    pub status: String,
-    pub discrepancy_count: i32,
-    pub unresolved_count: i32,
-    pub synced_at: Option<String>,
-    pub error_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DiscrepancyView {
-    pub id: Uuid,
-    pub printing_id: Option<Uuid>,
-    pub pos_sku: String,
-    pub discrepancy_type: String,
-    pub catalogue_qty: Option<i32>,
-    pub pos_qty: Option<i32>,
-    pub resolution: String,
-    pub resolved_at: Option<String>,
-    pub notes: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReportDetail {
-    pub report: ReportView,
-    pub discrepancies: Vec<DiscrepancyView>,
-}
-
-// ─── Server functions ─────────────────────────────────────────────────────────
-
-#[server(GetReportDetail, "/api")]
-pub async fn get_report_detail(report_id: String) -> Result<ReportDetail, ServerFnError> {
-    #[cfg(feature = "ssr")]
-    {
-        use cardguard_api::ReconciliationService;
-        use leptos_axum::extract;
-        use sqlx::PgPool;
-
-        let pool = extract::<axum::Extension<PgPool>>()
-            .await
-            .map(|e| e.0)
-            .map_err(sf)?;
-
-        let rid = Uuid::parse_str(&report_id).map_err(|_| sf("Invalid report ID"))?;
-
-        let report = ReconciliationService::get_report(&pool, rid)
-            .await
-            .map_err(sf)?;
-
-        let discrepancies = ReconciliationService::get_discrepancies(&pool, rid)
-            .await
-            .map_err(sf)?;
-
-        Ok(ReportDetail {
-            report: ReportView {
-                id: report.id,
-                connection_id: report.connection_id,
-                report_date: report.report_date.to_string(),
-                status: report.status,
-                discrepancy_count: report.discrepancy_count,
-                unresolved_count: report.unresolved_count,
-                synced_at: report.synced_at.map(|t| t.to_rfc3339()),
-                error_message: report.error_message,
-            },
-            discrepancies: discrepancies
-                .into_iter()
-                .map(|d| DiscrepancyView {
-                    id: d.id,
-                    printing_id: d.printing_id,
-                    pos_sku: d.pos_sku,
-                    discrepancy_type: d.discrepancy_type,
-                    catalogue_qty: d.catalogue_qty,
-                    pos_qty: d.pos_qty,
-                    resolution: d.resolution,
-                    resolved_at: d.resolved_at.map(|t| t.to_rfc3339()),
-                    notes: d.notes,
-                })
-                .collect(),
-        })
-    }
-    #[cfg(not(feature = "ssr"))]
-    {
-        Err(sf("SSR only"))
-    }
-}
-
-#[server(ResolveDiscrepancy, "/api")]
-pub async fn resolve_discrepancy_action(
-    workspace_id: String,
-    discrepancy_id: String,
-    resolution: String,
-    notes: Option<String>,
-) -> Result<DiscrepancyView, ServerFnError> {
-    #[cfg(feature = "ssr")]
-    {
-        use cardguard_api::ReconciliationService;
-        use leptos_axum::extract;
-        use sqlx::PgPool;
-
-        let pool = extract::<axum::Extension<PgPool>>()
-            .await
-            .map(|e| e.0)
-            .map_err(sf)?;
-
-        let wid = Uuid::parse_str(&workspace_id).map_err(|_| sf("Invalid workspace ID"))?;
-        let did = Uuid::parse_str(&discrepancy_id).map_err(|_| sf("Invalid discrepancy ID"))?;
-
-        let disc = ReconciliationService::resolve_discrepancy(
-            &pool,
-            wid,
-            did,
-            &resolution,
-            notes.as_deref(),
-        )
-        .await
-        .map_err(sf)?;
-
-        Ok(DiscrepancyView {
-            id: disc.id,
-            printing_id: disc.printing_id,
-            pos_sku: disc.pos_sku,
-            discrepancy_type: disc.discrepancy_type,
-            catalogue_qty: disc.catalogue_qty,
-            pos_qty: disc.pos_qty,
-            resolution: disc.resolution,
-            resolved_at: disc.resolved_at.map(|t| t.to_rfc3339()),
-            notes: disc.notes,
-        })
-    }
-    #[cfg(not(feature = "ssr"))]
-    {
-        Err(sf("SSR only"))
-    }
-}
-
-// ─── Component helpers ────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 fn disc_type_label(t: &str) -> &'static str {
     match t {
@@ -178,56 +36,69 @@ fn resolution_label(r: &str) -> &'static str {
     }
 }
 
+fn status_badge_class(status: &str) -> &'static str {
+    match status {
+        "completed" => "badge badge-success",
+        "syncing" => "badge badge-info",
+        "failed" | "stale" => "badge badge-error",
+        _ => "badge badge-neutral",
+    }
+}
+
 // ─── DiscrepancyRow component ─────────────────────────────────────────────────
 
 #[component]
 fn DiscrepancyRow(
-    disc: DiscrepancyView,
-    workspace_id: String,
-    on_resolved: Action<(String, String, String, Option<String>), Result<DiscrepancyView, ServerFnError>>,
+    disc: DiscrepancyDto,
+    workspace_id: Uuid,
+    report_id: Uuid,
+    on_resolved: Callback<DiscrepancyDto>,
 ) -> impl IntoView {
-    let disc = create_rw_signal(disc);
-    let (notes_input, set_notes_input) = create_signal(String::new());
+    let (current, set_current) = signal(disc);
+    let (notes_input, set_notes_input) = signal(String::new());
+    let (busy, set_busy) = signal(false);
+    let (error, set_error) = signal(Option::<String>::None);
 
-    let resolve = {
-        let wid = workspace_id.clone();
-        move |resolution: &'static str| {
-            let d = disc.get();
-            let did = d.id.to_string();
-            let notes = notes_input.get();
-            let notes_opt = if notes.is_empty() { None } else { Some(notes) };
-            on_resolved.dispatch((wid.clone(), did, resolution.to_string(), notes_opt));
+    let resolve = move |resolution: &'static str| {
+        let d = current.get_untracked();
+        if d.resolution != "pending" {
+            return;
         }
+        let notes = notes_input.get_untracked();
+        let notes_opt = if notes.is_empty() { None } else { Some(notes) };
+        set_busy.set(true);
+        set_error.set(None);
+        let disc_id = d.id;
+        let on_resolved = on_resolved.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            match api::resolve_discrepancy(workspace_id, report_id, disc_id, resolution, notes_opt).await {
+                Ok(updated) => {
+                    set_current.set(updated.clone());
+                    on_resolved.run(updated);
+                }
+                Err(e) => set_error.set(Some(e)),
+            }
+            set_busy.set(false);
+        });
     };
 
-    // Update local state when the action completes for this disc.
-    create_effect(move |_| {
-        if let Some(Ok(updated)) = on_resolved.value().get() {
-            if updated.id == disc.get().id {
-                disc.set(updated);
-            }
-        }
-    });
-
     view! {
-        <tr class=move || if disc.get().resolution == "pending" { "row-pending" } else { "row-resolved" }>
+        <tr class=move || if current.get().resolution == "pending" { "row-pending" } else { "row-resolved" }>
             <td>
-                <span class=move || disc_type_class(&disc.get().discrepancy_type)>
-                    {move || disc_type_label(&disc.get().discrepancy_type)}
+                <span class=move || disc_type_class(&current.get().discrepancy_type)>
+                    {move || disc_type_label(&current.get().discrepancy_type)}
                 </span>
             </td>
-            <td class="sku-cell">{move || disc.get().pos_sku.clone()}</td>
+            <td class="sku-cell">{move || current.get().pos_sku.clone()}</td>
             <td class="qty-cell">
-                {move || disc.get().catalogue_qty.map(|q| q.to_string()).unwrap_or_else(|| "—".into())}
+                {move || current.get().catalogue_qty.map(|q| q.to_string()).unwrap_or_else(|| "\u{2014}".into())}
             </td>
             <td class="qty-cell">
-                {move || disc.get().pos_qty.map(|q| q.to_string()).unwrap_or_else(|| "—".into())}
+                {move || current.get().pos_qty.map(|q| q.to_string()).unwrap_or_else(|| "\u{2014}".into())}
             </td>
             <td>
                 {move || {
-                    let current_resolution = disc.get().resolution;
-                    if current_resolution == "pending" {
-                        let r = resolve.clone();
+                    if current.get().resolution == "pending" {
                         view! {
                             <div class="resolve-actions">
                                 <input
@@ -235,50 +106,49 @@ fn DiscrepancyRow(
                                     placeholder="Notes (optional)"
                                     class="notes-input"
                                     on:input=move |ev| set_notes_input.set(event_target_value(&ev))
+                                    prop:disabled=move || busy.get()
                                 />
                                 <div class="resolve-buttons">
                                     <button
                                         class="btn btn-sm btn-primary"
-                                        on:click=move |_| r("accept_pos")
+                                        disabled=move || busy.get()
+                                        on:click=move |_| resolve("accept_pos")
                                     >
                                         "Accept POS"
                                     </button>
                                     <button
                                         class="btn btn-sm btn-secondary"
-                                        on:click={
-                                            let r = resolve.clone();
-                                            move |_| r("accept_catalogue")
-                                        }
+                                        disabled=move || busy.get()
+                                        on:click=move |_| resolve("accept_catalogue")
                                     >
                                         "Accept Catalogue"
                                     </button>
                                     <button
                                         class="btn btn-sm btn-ghost"
-                                        on:click={
-                                            let r = resolve.clone();
-                                            move |_| r("manual_adjust")
-                                        }
+                                        disabled=move || busy.get()
+                                        on:click=move |_| resolve("manual_adjust")
                                     >
                                         "Manual Adjust"
                                     </button>
                                     <button
                                         class="btn btn-sm btn-ghost"
-                                        on:click={
-                                            let r = resolve.clone();
-                                            move |_| r("investigate")
-                                        }
+                                        disabled=move || busy.get()
+                                        on:click=move |_| resolve("investigate")
                                     >
                                         "Investigate"
                                     </button>
                                 </div>
+                                {move || error.get().map(|e| view! {
+                                    <span class="error-text">{e}</span>
+                                })}
                             </div>
-                        }.into_view()
+                        }.into_any()
                     } else {
                         view! {
                             <span class="resolution-label">
-                                {resolution_label(&current_resolution)}
+                                {move || resolution_label(&current.get().resolution)}
                             </span>
-                        }.into_view()
+                        }.into_any()
                     }
                 }}
             </td>
@@ -291,70 +161,88 @@ fn DiscrepancyRow(
 #[component]
 pub fn ReconcileReportPage() -> impl IntoView {
     let params = use_params_map();
-    let report_id =
-        move || params.with(|p| p.get("report_id").cloned().unwrap_or_default());
 
-    // &'static str is Copy — safely captured by any number of closures.
-    const WID: &str = "00000000-0000-0000-0000-000000000000";
+    let workspace_id = move || {
+        params.with(|p| {
+            p.get("wid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .unwrap_or_default()
+        })
+    };
+    let report_id = move || {
+        params.with(|p| {
+            p.get("rid")
+                .as_deref()
+                .and_then(|s| Uuid::parse_str(s).ok())
+                .unwrap_or_default()
+        })
+    };
 
-    let detail = create_resource(report_id, |rid| async move { get_report_detail(rid).await });
+    let detail = LocalResource::new(move || {
+        let wid = workspace_id();
+        let rid = report_id();
+        async move { api::fetch_reconcile_report(wid, rid).await.ok() }
+    });
 
-    let resolve_action = create_action(
-        |(wid, did, resolution, notes): &(String, String, String, Option<String>)| {
-            let wid = wid.clone();
-            let did = did.clone();
-            let resolution = resolution.clone();
-            let notes = notes.clone();
-            async move { resolve_discrepancy_action(wid, did, resolution, notes).await }
-        },
-    );
+    // Track resolved count locally to show progress without a full refetch.
+    let (extra_resolved, set_extra_resolved) = signal(0usize);
+
+    let on_resolved = Callback::new(move |_updated: DiscrepancyDto| {
+        set_extra_resolved.update(|n| *n += 1);
+    });
+
+    let back_href = move || format!("/workspaces/{}/reconcile", workspace_id());
 
     view! {
         <div class="reconcile-report">
             <div class="page-header">
-                <A href="/reconcile">"← Back to Dashboard"</A>
+                <A href=back_href>"\u{2190} Back to Dashboard"</A>
                 <h1>"Reconciliation Report"</h1>
             </div>
 
-            <Suspense fallback=|| view! { <p class="loading">"Loading report…"</p> }>
+            <Suspense fallback=|| view! { <p class="loading">"Loading report\u{2026}"</p> }>
                 {move || {
-                    detail.get().map(|res| match res {
-                        Err(e) => view! {
-                            <div class="error-banner">
-                                <p>"Failed to load report: " {e.to_string()}</p>
-                            </div>
-                        }.into_view(),
-                        Ok(d) => {
-                            let report = d.report.clone();
-                            let discs = d.discrepancies.clone();
+                    match detail.get().map(|sw| sw.take()) {
+                        None => view! { <p class="loading">"Loading\u{2026}"</p> }.into_any(),
+                        Some(None) => view! {
+                            <div class="error-banner"><p>"Failed to load report."</p></div>
+                        }.into_any(),
+                        Some(Some(ReportDetailDto { report, discrepancies })) => {
+                            let total = discrepancies.len();
+                            let initial_unresolved = discrepancies.iter().filter(|d| d.resolution == "pending").count();
 
-                            let all_resolved = discs.iter().all(|d| d.resolution != "pending");
-                            let unresolved_count = discs.iter().filter(|d| d.resolution == "pending").count();
+                            let unresolved_count = move || {
+                                initial_unresolved.saturating_sub(extra_resolved.get())
+                            };
+                            let resolved_count = move || total - unresolved_count();
+                            let all_resolved = move || unresolved_count() == 0;
+
+                            let report_date = report.report_date.clone();
+                            let status = report.status.clone();
+                            let badge = status_badge_class(&report.status);
+                            let synced_at = report.synced_at.clone();
+                            let error_message = report.error_message.clone();
+                            let rid = report.id;
 
                             view! {
                                 <div>
-                                    // Report meta
                                     <div class="report-meta">
                                         <div class="meta-row">
                                             <span class="meta-label">"Date"</span>
-                                            <span>{report.report_date.clone()}</span>
+                                            <span>{report_date}</span>
                                         </div>
                                         <div class="meta-row">
                                             <span class="meta-label">"Status"</span>
-                                            <span class=format!("badge {}", match report.status.as_str() {
-                                                "completed" => "badge-success",
-                                                "syncing" => "badge-info",
-                                                "failed" | "stale" => "badge-error",
-                                                _ => "badge-neutral",
-                                            })>{report.status.clone()}</span>
+                                            <span class=badge>{status}</span>
                                         </div>
-                                        {report.synced_at.clone().map(|t| view! {
+                                        {synced_at.map(|t| view! {
                                             <div class="meta-row">
                                                 <span class="meta-label">"Last synced"</span>
                                                 <span>{t}</span>
                                             </div>
                                         })}
-                                        {report.error_message.clone().map(|e| view! {
+                                        {error_message.map(|e| view! {
                                             <div class="meta-row error-row">
                                                 <span class="meta-label">"Error"</span>
                                                 <span class="error-text">{e}</span>
@@ -362,50 +250,57 @@ pub fn ReconcileReportPage() -> impl IntoView {
                                         })}
                                     </div>
 
-                                    // Progress towards zero discrepancies
-                                    {if discs.is_empty() {
+                                    // Progress toward zero discrepancies
+                                    {if total == 0 {
                                         view! {
                                             <div class="all-in-sync-banner">
-                                                <span class="checkmark">"✓"</span>
+                                                <span class="checkmark">"\u{2713}"</span>
                                                 <strong>"All in sync"</strong>
-                                                " — no discrepancies found."
+                                                " \u{2014} no discrepancies found."
                                             </div>
-                                        }.into_view()
-                                    } else if all_resolved {
-                                        view! {
-                                            <div class="all-resolved-banner">
-                                                <span class="checkmark">"✓"</span>
-                                                <strong>"Zero unexplained discrepancies"</strong>
-                                                " — all items resolved."
-                                            </div>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
                                         view! {
                                             <div class="progress-banner">
-                                                <span>
-                                                    {format!(
-                                                        "{} of {} discrepanc{} resolved",
-                                                        discs.len() - unresolved_count,
-                                                        discs.len(),
-                                                        if discs.len() == 1 { "y" } else { "ies" },
-                                                    )}
-                                                </span>
-                                                <div class="progress-bar">
-                                                    <div
-                                                        class="progress-fill"
-                                                        style=format!(
-                                                            "width: {}%",
-                                                            (discs.len() - unresolved_count) * 100 / discs.len()
-                                                        )
-                                                    />
-                                                </div>
+                                                {move || if all_resolved() {
+                                                    view! {
+                                                        <div class="all-resolved-banner">
+                                                            <span class="checkmark">"\u{2713}"</span>
+                                                            <strong>"Zero unexplained discrepancies"</strong>
+                                                            " \u{2014} all items resolved."
+                                                        </div>
+                                                    }.into_any()
+                                                } else {
+                                                    view! {
+                                                        <div>
+                                                            <span>
+                                                                {move || format!(
+                                                                    "{} of {} discrepanc{} resolved",
+                                                                    resolved_count(),
+                                                                    total,
+                                                                    if total == 1 { "y" } else { "ies" },
+                                                                )}
+                                                            </span>
+                                                            <div class="progress-bar">
+                                                                <div
+                                                                    class="progress-fill"
+                                                                    style=move || format!(
+                                                                        "width: {}%",
+                                                                        if total > 0 { resolved_count() * 100 / total } else { 0 }
+                                                                    )
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    }.into_any()
+                                                }}
                                             </div>
-                                        }.into_view()
+                                        }.into_any()
                                     }}
 
                                     // Discrepancy table
-                                    {if !discs.is_empty() {
-                                        let action_clone = resolve_action;
+                                    {if !discrepancies.is_empty() {
+                                        let wid = workspace_id();
+                                        let on_resolved_clone = on_resolved.clone();
                                         view! {
                                             <table class="discrepancy-table">
                                                 <thead>
@@ -418,42 +313,29 @@ pub fn ReconcileReportPage() -> impl IntoView {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    <For
-                                                        each=move || discs.clone()
-                                                        key=|d| d.id
-                                                        children=move |disc| {
-                                                            view! {
-                                                                <DiscrepancyRow
-                                                                    disc=disc
-                                                                    workspace_id=WID.to_string()
-                                                                    on_resolved=action_clone
-                                                                />
-                                                            }
+                                                    {discrepancies.into_iter().map(|disc| {
+                                                        let on_r = on_resolved_clone.clone();
+                                                        view! {
+                                                            <DiscrepancyRow
+                                                                disc=disc
+                                                                workspace_id=wid
+                                                                report_id=rid
+                                                                on_resolved=on_r
+                                                            />
                                                         }
-                                                    />
+                                                    }).collect_view()}
                                                 </tbody>
                                             </table>
-                                        }.into_view()
+                                        }.into_any()
                                     } else {
-                                        view! { <div/> }.into_view()
+                                        view! { <div /> }.into_any()
                                     }}
                                 </div>
-                            }.into_view()
+                            }.into_any()
                         }
-                    })
+                    }
                 }}
             </Suspense>
-
-            // Error toast when resolve action fails.
-            {move || {
-                resolve_action.value().get().and_then(|r| r.err()).map(|e| {
-                    view! {
-                        <div class="toast toast-error">
-                            "Failed to resolve: " {e.to_string()}
-                        </div>
-                    }
-                })
-            }}
         </div>
     }
 }

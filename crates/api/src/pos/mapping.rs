@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, put},
     Json, Router,
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::{error::AppError, models::connection::PosConnection, AppState};
+use crate::{app::AppState, error::AppError, models::connection::PosConnection};
 
 // ─── Domain models ────────────────────────────────────────────────────────────
 
@@ -162,7 +162,6 @@ impl MappingService {
         pos_sku: &str,
         printing_id: Uuid,
     ) -> Result<MappingWithBackfill, AppError> {
-        // Verify printing belongs to the workspace.
         let printing_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM printings WHERE id = $1 AND workspace_id = $2)",
         )
@@ -172,10 +171,7 @@ impl MappingService {
         .await?;
 
         if !printing_exists {
-            return Err(AppError::NotFound(format!(
-                "Printing {} not found in workspace",
-                printing_id
-            )));
+            return Err(AppError::NotFound);
         }
 
         let mapping = sqlx::query_as::<_, PosProductMapping>(
@@ -197,13 +193,10 @@ impl MappingService {
             _ => AppError::from(e),
         })?;
 
-        // Back-fill: link historical unmapped transaction lines to this printing
-        // and adjust catalogue quantity for their net effect.
         let backfill_count =
             Self::backfill_unmapped_lines(pool, workspace_id, connection_id, pos_sku, &mapping)
                 .await?;
 
-        // Remove from unmapped queue now that it's mapped.
         sqlx::query(
             "DELETE FROM unmapped_pos_skus \
              WHERE connection_id = $1 AND pos_sku = $2",
@@ -233,9 +226,8 @@ impl MappingService {
         .bind(workspace_id)
         .fetch_optional(pool)
         .await?
-        .ok_or_else(|| AppError::NotFound("Mapping not found".into()))?;
+        .ok_or(AppError::NotFound)?;
 
-        // Verify new printing belongs to the workspace.
         let printing_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM printings WHERE id = $1 AND workspace_id = $2)",
         )
@@ -245,13 +237,9 @@ impl MappingService {
         .await?;
 
         if !printing_exists {
-            return Err(AppError::NotFound(format!(
-                "Printing {} not found in workspace",
-                new_printing_id
-            )));
+            return Err(AppError::NotFound);
         }
 
-        // Reverse the quantity effect on the old printing.
         Self::reverse_line_effects(pool, workspace_id, mapping_id, old.printing_id).await?;
 
         let updated = sqlx::query_as::<_, PosProductMapping>(
@@ -265,7 +253,6 @@ impl MappingService {
         .fetch_one(pool)
         .await?;
 
-        // Re-apply line effects to the new printing.
         let backfill_count =
             Self::backfill_unmapped_lines(pool, workspace_id, old.connection_id, &old.pos_sku, &updated)
                 .await?;
@@ -292,13 +279,11 @@ impl MappingService {
         .await?;
 
         if rows.rows_affected() == 0 {
-            return Err(AppError::NotFound("Mapping not found".into()));
+            return Err(AppError::NotFound);
         }
         Ok(())
     }
 
-    /// Back-fill all unmapped transaction_lines for this SKU to point at the new mapping,
-    /// and apply their net quantity effect to the printing's catalogue quantity.
     async fn backfill_unmapped_lines(
         pool: &PgPool,
         workspace_id: Uuid,
@@ -306,7 +291,6 @@ impl MappingService {
         pos_sku: &str,
         mapping: &PosProductMapping,
     ) -> Result<i64, AppError> {
-        // Update lines: link them to this mapping.
         let updated = sqlx::query(
             "UPDATE transaction_lines tl \
              SET printing_id = $3, pos_product_mapping_id = $4 \
@@ -323,7 +307,6 @@ impl MappingService {
         .execute(pool)
         .await?;
 
-        // Calculate net quantity delta from those lines and apply to the printing.
         let net_delta: Option<i64> = sqlx::query_scalar(
             "SELECT COALESCE(SUM(tl.quantity), 0) \
              FROM transaction_lines tl \
@@ -353,7 +336,6 @@ impl MappingService {
         Ok(updated.rows_affected() as i64)
     }
 
-    /// Reverse the quantity effect of all lines associated with a mapping (used on update).
     async fn reverse_line_effects(
         pool: &PgPool,
         workspace_id: Uuid,
@@ -370,7 +352,6 @@ impl MappingService {
         .await?;
 
         if let Some(delta) = net_delta.filter(|d| *d != 0) {
-            // Negate to reverse the effect.
             sqlx::query(
                 "UPDATE printings SET quantity = quantity - $1, updated_at = NOW() \
                  WHERE id = $2 AND workspace_id = $3",
@@ -420,31 +401,36 @@ pub struct UpdateMappingRequest {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/pos/mapping", get(handle_list_mappings).post(handle_create_mapping))
         .route(
-            "/pos/mapping/:mapping_id",
+            "/workspaces/:wid/pos/mapping",
+            get(handle_list_mappings).post(handle_create_mapping),
+        )
+        .route(
+            "/workspaces/:wid/pos/mapping/:mapping_id",
             put(handle_update_mapping).delete(handle_delete_mapping),
         )
 }
 
 async fn handle_list_mappings(
     State(state): State<AppState>,
-    axum::extract::Query(q): axum::extract::Query<MappingQuery>,
+    Path(wid): Path<Uuid>,
+    Query(q): Query<MappingQuery>,
 ) -> Result<Json<MappingQueue>, AppError> {
     let mappings =
-        MappingService::list_mappings(&state.pool, state.workspace_id, q.connection_id).await?;
+        MappingService::list_mappings(&state.pool, wid, q.connection_id).await?;
     let unmapped =
-        MappingService::list_unmapped(&state.pool, state.workspace_id, q.connection_id).await?;
+        MappingService::list_unmapped(&state.pool, wid, q.connection_id).await?;
     Ok(Json(MappingQueue { mappings, unmapped }))
 }
 
 async fn handle_create_mapping(
     State(state): State<AppState>,
+    Path(wid): Path<Uuid>,
     Json(req): Json<CreateMappingRequest>,
 ) -> Result<(StatusCode, Json<MappingWithBackfill>), AppError> {
     let result = MappingService::create_mapping(
         &state.pool,
-        state.workspace_id,
+        wid,
         req.connection_id,
         &req.pos_sku,
         req.printing_id,
@@ -455,12 +441,12 @@ async fn handle_create_mapping(
 
 async fn handle_update_mapping(
     State(state): State<AppState>,
-    Path(mapping_id): Path<Uuid>,
+    Path((wid, mapping_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateMappingRequest>,
 ) -> Result<Json<MappingWithBackfill>, AppError> {
     let result = MappingService::update_mapping(
         &state.pool,
-        state.workspace_id,
+        wid,
         mapping_id,
         req.printing_id,
     )
@@ -470,9 +456,9 @@ async fn handle_update_mapping(
 
 async fn handle_delete_mapping(
     State(state): State<AppState>,
-    Path(mapping_id): Path<Uuid>,
+    Path((wid, mapping_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode, AppError> {
-    MappingService::delete_mapping(&state.pool, state.workspace_id, mapping_id).await?;
+    MappingService::delete_mapping(&state.pool, wid, mapping_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -480,12 +466,8 @@ async fn handle_delete_mapping(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn list_unmapped_excludes_already_mapped() {
-        // Verified by the SQL WHERE NOT EXISTS clause; logic is tested via integration tests.
-        // This unit test documents intent.
         let sql = "SELECT u.* FROM unmapped_pos_skus u \
                    WHERE NOT EXISTS (\
                        SELECT 1 FROM pos_product_mappings m \
