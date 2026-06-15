@@ -88,14 +88,14 @@ pub struct BulkTriageBody {
 // ─── Workspace access helpers ────────────────────────────────────────────────
 
 #[derive(FromRow)]
-struct WorkspaceAccess {
-    kind: WorkspaceKind,
-    role: Option<MemberRole>,
+pub struct WorkspaceAccess {
+    pub kind: WorkspaceKind,
+    pub role: Option<MemberRole>,
 }
 
-/// Returns (workspace_kind, member_role). 404 if workspace doesn't exist or
+/// Returns workspace kind + member role. 404 if workspace doesn't exist or
 /// caller isn't a member. Collector workspaces only see non-scalper flags.
-async fn workspace_access(
+pub async fn workspace_access(
     pool: &sqlx::PgPool,
     workspace_id: Uuid,
     caller_id: Uuid,
@@ -121,6 +121,13 @@ async fn workspace_access(
             Ok(row)
         }
     })
+}
+
+pub fn require_owner(access: &WorkspaceAccess) -> Result<(), AppError> {
+    match access.role {
+        Some(MemberRole::Owner) => Ok(()),
+        _ => Err(AppError::Forbidden("owner role required".into())),
+    }
 }
 
 fn require_staff_or_owner(access: &WorkspaceAccess) -> Result<(), AppError> {

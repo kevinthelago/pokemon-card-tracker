@@ -21,6 +21,8 @@ pub struct AppState {
     pub tcg_client: Arc<PokemonTcgClient>,
     pub grading: Arc<GradingService>,
     pub valuation: Arc<ValuationService>,
+    /// Present when REDIS_URL is set; used by scalper velocity counters.
+    pub redis: Option<redis::aio::ConnectionManager>,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ pub fn create_router() -> Router<AppState> {
         .nest("/api", fraud::routes::routes())
         .nest("/api", catalogue::routes::router())
         .nest("/api", crate::grading::routes::router())
+        .nest("/api", fraud::detect_scalpers::routes())
         .nest("/api/catalogue", catalogue::csv_routes())
         .nest("/api", catalogue::valuation_routes::routes())
         .merge(pos::connect::routes())

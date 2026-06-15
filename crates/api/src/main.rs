@@ -46,19 +46,30 @@ async fn main() -> anyhow::Result<()> {
     let psa_api_key = std::env::var("PSA_API_KEY").ok();
     let grading = Arc::new(GradingService::new(pool.clone(), psa_api_key, 3600));
 
-    let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
+    let redis = match std::env::var("REDIS_URL") {
+        Ok(url) => {
+            let client = redis::Client::open(url.as_str())?;
+            match redis::aio::ConnectionManager::new(client).await {
+                Ok(conn) => {
+                    tracing::info!("connected to Redis — velocity counters active");
+                    Some(conn)
+                }
+                Err(e) => {
+                    tracing::warn!("Redis unavailable: {e} — velocity counters disabled");
+                    None
+                }
+            }
+        }
+        Err(_) => {
+            tracing::info!("REDIS_URL not set — velocity counters will use Postgres fallback");
+            None
+        }
+    };
 
+    let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = app::AppState {
-        pool,
-        mailer,
-        base_url,
-        encryption_key,
-        tcg_client,
-        grading,
-        valuation,
-    };
+    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client, grading, valuation, redis };
 
     let router = app::create_router()
         .merge(pos::reconcile::routes())

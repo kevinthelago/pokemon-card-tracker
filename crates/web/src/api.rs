@@ -544,3 +544,49 @@ pub async fn post_void(path: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+// ─── Scalper settings API ────────────────────────────────────────────────────
+
+use crate::routes::settings::scalper::{AllowlistEntry, DetectionConfig};
+
+#[derive(serde::Serialize)]
+pub struct UpdateConfigBody {
+    pub enabled: Option<bool>,
+    pub velocity_window_hours: Option<i32>,
+    pub velocity_threshold: Option<i32>,
+    pub bulk_single_item_limit: Option<i32>,
+    pub sweep_printing_limit: Option<i32>,
+    pub repeat_window_minutes: Option<i32>,
+}
+
+#[derive(serde::Serialize)]
+pub struct AddAllowlistBody {
+    pub buyer_hash: String,
+    pub notes: Option<String>,
+}
+
+pub async fn fetch_scalper_config(workspace_id: Uuid) -> Result<DetectionConfig, String> {
+    get_json(&format!("/workspaces/{workspace_id}/scalper-config")).await
+}
+
+pub async fn update_scalper_config(
+    workspace_id: Uuid,
+    body: &UpdateConfigBody,
+) -> Result<DetectionConfig, String> {
+    patch_json_ret(&format!("/workspaces/{workspace_id}/scalper-config"), body).await
+}
+
+pub async fn fetch_allowlist(workspace_id: Uuid) -> Result<Vec<AllowlistEntry>, String> {
+    get_json(&format!("/workspaces/{workspace_id}/buyer-allowlist")).await
+}
+
+pub async fn add_allowlist_entry(
+    workspace_id: Uuid,
+    body: &AddAllowlistBody,
+) -> Result<AllowlistEntry, String> {
+    post_json(&format!("/workspaces/{workspace_id}/buyer-allowlist"), body).await
+}
+
+pub async fn remove_allowlist_entry(workspace_id: Uuid, entry_id: Uuid) -> Result<(), String> {
+    delete_req(&format!("/workspaces/{workspace_id}/buyer-allowlist/{entry_id}")).await
+}

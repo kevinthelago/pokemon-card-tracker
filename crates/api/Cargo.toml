@@ -47,6 +47,7 @@ bytes = "1"
 domain   = { path = "../domain" }
 reqwest  = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 governor = "0.6"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 [dev-dependencies]
 httpmock = "0.7"

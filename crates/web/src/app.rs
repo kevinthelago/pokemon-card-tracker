@@ -21,7 +21,7 @@ use crate::routes::{
     inventory::{InventoryDetailPage, InventoryListPage},
     reconcile::{MappingQueuePage, ReconcileDashboard, ReconcileReportPage},
     risk::RiskDashboardPage,
-    settings::{pos::PosSettingsPage, team::TeamPage},
+    settings::{pos::PosSettingsPage, scalper::ScalperSettings, team::TeamPage},
     stolen::{DisputePage, ModeratorQueue, MyReports, ReportForm},
     value::{CardHistoryPage, ValuePage},
     verify::VerifyPage,
@@ -87,6 +87,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/workspaces/:wid/inventory/:id") view=InventoryDetailPage />
                 <Route path=path!("/value/:wid") view=ValuePage />
                 <Route path=path!("/value/:wid/card/:printing_id/history") view=CardHistoryPage />
+                <Route path=path!("/settings/:wid/scalper") view=ScalperSettings />
             </Routes>
         </Router>
     }

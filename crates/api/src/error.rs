@@ -48,3 +48,5 @@ impl IntoResponse for AppError {
         (status, Json(json!({ "error": message }))).into_response()
     }
 }
+
+pub type Result<T> = std::result::Result<T, AppError>;
