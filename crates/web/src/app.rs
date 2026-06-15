@@ -11,7 +11,7 @@ use crate::routes::{
     import::{ExportPage, ImportWizard},
     reconcile::{MappingQueuePage, ReconcileDashboard, ReconcileReportPage},
     risk::RiskDashboardPage,
-    settings::team::TeamPage,
+    settings::{pos::PosSettingsPage, team::TeamPage},
     stolen::{DisputePage, ModeratorQueue, MyReports, ReportForm},
 };
 
@@ -40,6 +40,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/workspaces/:wid/reconcile/report/:rid") view=ReconcileReportPage />
                 <Route path=path!("/workspaces/:wid/reconcile/mapping") view=MappingQueuePage />
                 <Route path=path!("/settings/:wid/team") view=TeamPage />
+                <Route path=path!("/settings/:wid/pos") view=PosSettingsPage />
                 <Route path=path!("/stolen/report") view=ReportForm />
                 <Route path=path!("/stolen/my-reports") view=MyReports />
                 <Route path=path!("/stolen/queue") view=ModeratorQueue />

@@ -4,17 +4,16 @@ use sqlx::PgPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::{catalogue, fraud, workspace};
+use crate::{catalogue, crypto::EncryptionKey, fraud, pos, workspace};
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
     pub mailer: AsyncSmtpTransport<Tokio1Executor>,
     pub base_url: String,
+    pub encryption_key: EncryptionKey,
 }
 
-/// Returns a `Router<AppState>` without consuming state so callers can
-/// merge additional routes before calling `.with_state()`.
 pub fn create_router() -> Router<AppState> {
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -26,6 +25,7 @@ pub fn create_router() -> Router<AppState> {
         .nest("/api", workspace::routes().merge(fraud::stolen::routes()))
         .nest("/api", fraud::routes::routes())
         .nest("/api/catalogue", catalogue::csv_routes())
+        .merge(pos::connect::routes())
         .layer(TraceLayer::new_for_http())
         .layer(cors)
 }

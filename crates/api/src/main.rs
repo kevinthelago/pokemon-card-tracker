@@ -1,6 +1,6 @@
 use anyhow::Context;
 use axum::Extension;
-use cardguard_api::{app, auth, pos, NullPosProvider, PosProvider};
+use cardguard_api::{app, auth, crypto::EncryptionKey, pos, NullPosProvider, PosProvider};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
@@ -30,11 +30,16 @@ async fn main() -> anyhow::Result<()> {
     let base_url =
         std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
+    let encryption_key_hex =
+        std::env::var("ENCRYPTION_KEY").context("ENCRYPTION_KEY must be set")?;
+    let encryption_key = EncryptionKey::from_hex(&encryption_key_hex)
+        .context("ENCRYPTION_KEY must be 64 hex chars (32 bytes)")?;
+
     let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
 
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = app::AppState { pool, mailer, base_url };
+    let state = app::AppState { pool, mailer, base_url, encryption_key };
 
     let router = app::create_router()
         .merge(pos::reconcile::routes())

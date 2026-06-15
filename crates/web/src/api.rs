@@ -201,6 +201,33 @@ pub async fn delete_mapping(workspace_id: Uuid, mapping_id: Uuid) -> Result<(), 
     delete_req(&format!("/workspaces/{workspace_id}/pos/mapping/{mapping_id}")).await
 }
 
+// ─── POS connect API ─────────────────────────────────────────────────────────
+
+use crate::routes::settings::pos::PosConnectionDto;
+
+pub async fn fetch_pos_connections(workspace_id: Uuid) -> Result<Vec<PosConnectionDto>, String> {
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        connections: Vec<PosConnectionDto>,
+    }
+    let r: Resp = get_json(&format!("/workspaces/{workspace_id}/pos/connections")).await?;
+    Ok(r.connections)
+}
+
+pub async fn start_pos_oauth(workspace_id: Uuid, provider: &str) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        authorization_url: String,
+    }
+    let r: Resp =
+        post_json(&format!("/workspaces/{workspace_id}/pos/connect/{provider}"), &()).await?;
+    Ok(r.authorization_url)
+}
+
+pub async fn disconnect_pos(workspace_id: Uuid, connection_id: Uuid) -> Result<(), String> {
+    delete_req(&format!("/workspaces/{workspace_id}/pos/connections/{connection_id}")).await
+}
+
 // ─── Stolen-card API ─────────────────────────────────────────────────────────
 
 pub async fn submit_stolen_report(

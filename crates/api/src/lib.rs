@@ -1,9 +1,11 @@
 pub mod app;
 pub mod auth;
 pub mod catalogue;
+pub mod crypto;
 pub mod db;
 pub mod error;
 pub mod fraud;
+pub mod jobs;
 pub mod models;
 pub mod notify;
 pub mod pos;
