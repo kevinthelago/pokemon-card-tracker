@@ -320,6 +320,8 @@ fn SummarySkeletons() -> impl IntoView {
     }
 }
 
+// leptos-chartistry 0.2.x requires Leptos 0.8; this project is on 0.7, so
+// the trend chart uses a CSS-based bar implementation instead.
 #[component]
 fn TrendChart(points: Vec<super::TrendPoint>) -> impl IntoView {
     let max_val = points
