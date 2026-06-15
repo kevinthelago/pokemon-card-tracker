@@ -5,6 +5,7 @@ pub mod db;
 pub mod error;
 pub mod fraud;
 pub mod models;
+pub mod notify;
 pub mod pos;
 pub mod workspace;
 

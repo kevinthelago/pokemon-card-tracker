@@ -29,5 +29,5 @@ lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls", 
 rand = "0.8"
 dotenvy = "0.15"
 async-trait = { workspace = true }
-
+base64 = "0.22"
 csv = "1"

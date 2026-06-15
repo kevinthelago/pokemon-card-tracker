@@ -8,6 +8,9 @@ use crate::routes::reconcile::{
     DiscrepancyDto, MappingQueueDto, MappingWithBackfillDto, ReconciliationReportDto,
     ReportDetailDto,
 };
+use crate::routes::risk::{
+    FlagKind, FlagSeverity, FlagStatus, FlagsPage, Notification, RiskFlag, RiskSummary,
+};
 use crate::routes::settings::team::{ChangeRoleBody, InviteDto, SendInviteBody, TeamResponse};
 use crate::routes::stolen::dispute::ReportDetails;
 use crate::routes::stolen::my_reports::ReportSummary;
@@ -53,6 +56,23 @@ async fn patch_json<B: Serialize>(path: &str, body: &B) -> Result<(), String> {
         return Err(format!("HTTP {}: {}", resp.status(), text));
     }
     Ok(())
+}
+
+async fn patch_json_ret<B: Serialize, T: DeserializeOwned>(
+    path: &str,
+    body: &B,
+) -> Result<T, String> {
+    let resp = Request::patch(&format!("{API_BASE}{path}"))
+        .json(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+    resp.json::<T>().await.map_err(|e| e.to_string())
 }
 
 async fn delete_req(path: &str) -> Result<(), String> {
@@ -183,7 +203,6 @@ pub async fn delete_mapping(workspace_id: Uuid, mapping_id: Uuid) -> Result<(), 
 
 // ─── Stolen-card API ─────────────────────────────────────────────────────────
 
-/// Submit a new community stolen-card report. Returns the created report ID.
 pub async fn submit_stolen_report(
     grader: String,
     cert_number: String,
@@ -206,12 +225,7 @@ pub async fn submit_stolen_report(
 
     let created: Created = post_json(
         "/stolen/reports",
-        &Body {
-            grader,
-            cert_number,
-            evidence,
-            notes,
-        },
+        &Body { grader, cert_number, evidence, notes },
     )
     .await?;
     Ok(created.id.to_string())
@@ -269,4 +283,112 @@ pub async fn submit_dispute(id: String, reason: String) -> Result<(), String> {
     post_json::<_, serde_json::Value>(&format!("/stolen/reports/{id}/dispute"), &Body { reason })
         .await
         .map(|_| ())
+}
+
+// ─── Risk API ─────────────────────────────────────────────────────────────────
+
+fn flag_kind_param(k: FlagKind) -> &'static str {
+    match k {
+        FlagKind::StolenCard => "stolen_card",
+        FlagKind::Scalper => "scalper",
+        FlagKind::Counterfeit => "counterfeit",
+    }
+}
+
+fn flag_severity_param(s: FlagSeverity) -> &'static str {
+    match s {
+        FlagSeverity::Low => "low",
+        FlagSeverity::Medium => "medium",
+        FlagSeverity::High => "high",
+        FlagSeverity::Critical => "critical",
+    }
+}
+
+fn flag_status_param(s: FlagStatus) -> &'static str {
+    match s {
+        FlagStatus::Open => "open",
+        FlagStatus::Reviewed => "reviewed",
+        FlagStatus::Dismissed => "dismissed",
+    }
+}
+
+pub async fn fetch_risk_flags(
+    workspace_id: Uuid,
+    kind: Option<FlagKind>,
+    severity: Option<FlagSeverity>,
+    status: Option<FlagStatus>,
+    after: Option<String>,
+) -> Result<FlagsPage, String> {
+    let mut qs = String::new();
+    if let Some(k) = kind {
+        qs.push_str(&format!("&kind={}", flag_kind_param(k)));
+    }
+    if let Some(s) = severity {
+        qs.push_str(&format!("&severity={}", flag_severity_param(s)));
+    }
+    if let Some(s) = status {
+        qs.push_str(&format!("&status={}", flag_status_param(s)));
+    }
+    if let Some(c) = after {
+        qs.push_str(&format!("&after={c}"));
+    }
+    let qs = if qs.is_empty() { String::new() } else { format!("?{}", &qs[1..]) };
+    get_json(&format!("/workspaces/{workspace_id}/risk/flags{qs}")).await
+}
+
+pub async fn fetch_risk_flag(workspace_id: Uuid, flag_id: Uuid) -> Result<RiskFlag, String> {
+    get_json(&format!("/workspaces/{workspace_id}/risk/flags/{flag_id}")).await
+}
+
+pub async fn triage_flag(
+    workspace_id: Uuid,
+    flag_id: Uuid,
+    status: &str,
+) -> Result<RiskFlag, String> {
+    patch_json_ret(
+        &format!("/workspaces/{workspace_id}/risk/flags/{flag_id}"),
+        &serde_json::json!({ "status": status }),
+    )
+    .await
+}
+
+pub async fn bulk_triage_flags(
+    workspace_id: Uuid,
+    flag_ids: &[Uuid],
+    status: &str,
+) -> Result<(), String> {
+    let body = serde_json::json!({ "flag_ids": flag_ids, "status": status });
+    let resp = Request::post(&format!("{API_BASE}/workspaces/{workspace_id}/risk/flags/bulk"))
+        .json(&body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+    Ok(())
+}
+
+pub async fn fetch_risk_summary(workspace_id: Uuid) -> Result<RiskSummary, String> {
+    get_json(&format!("/workspaces/{workspace_id}/risk/summary")).await
+}
+
+pub async fn fetch_notifications(workspace_id: Uuid) -> Result<Vec<Notification>, String> {
+    get_json(&format!("/workspaces/{workspace_id}/notifications")).await
+}
+
+pub async fn mark_notification_read(workspace_id: Uuid, notif_id: Uuid) -> Result<(), String> {
+    let resp = Request::post(&format!(
+        "{API_BASE}/workspaces/{workspace_id}/notifications/{notif_id}/read"
+    ))
+    .send()
+    .await
+    .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+    Ok(())
 }

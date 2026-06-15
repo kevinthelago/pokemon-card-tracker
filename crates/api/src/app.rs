@@ -24,6 +24,7 @@ pub fn create_router() -> Router<AppState> {
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .nest("/api", workspace::routes().merge(fraud::stolen::routes()))
+        .nest("/api", fraud::routes::routes())
         .nest("/api/catalogue", catalogue::csv_routes())
         .layer(TraceLayer::new_for_http())
         .layer(cors)

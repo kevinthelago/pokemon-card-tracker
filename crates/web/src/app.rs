@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::routes::{
     import::{ExportPage, ImportWizard},
     reconcile::{MappingQueuePage, ReconcileDashboard, ReconcileReportPage},
+    risk::RiskDashboardPage,
     settings::team::TeamPage,
     stolen::{DisputePage, ModeratorQueue, MyReports, ReportForm},
 };
@@ -45,6 +46,7 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/stolen/dispute/:id") view=DisputePage />
                 <Route path=path!("/catalogue/:wid/import") view=ImportPage />
                 <Route path=path!("/catalogue/:wid/export") view=ExportRoute />
+                <Route path=path!("/workspaces/:wid/risk") view=RiskDashboardPage />
             </Routes>
         </Router>
     }
