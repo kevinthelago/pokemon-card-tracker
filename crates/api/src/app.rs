@@ -1,19 +1,26 @@
-use axum::{Router, routing::get};
+use std::sync::Arc;
+
+use axum::{routing::get, Router};
 use lettre::{AsyncSmtpTransport, Tokio1Executor};
 use sqlx::PgPool;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
-use crate::workspace;
+use crate::{
+    catalogue, crypto::EncryptionKey, fraud, integrations::pokemontcg::PokemonTcgClient, pos,
+    workspace,
+};
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
     pub mailer: AsyncSmtpTransport<Tokio1Executor>,
     pub base_url: String,
+    pub encryption_key: EncryptionKey,
+    pub tcg_client: Arc<PokemonTcgClient>,
 }
 
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router() -> Router<AppState> {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -21,8 +28,11 @@ pub fn create_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(|| async { "ok" }))
-        .nest("/api", workspace::routes())
+        .nest("/api", workspace::routes().merge(fraud::stolen::routes()))
+        .nest("/api", fraud::routes::routes())
+        .nest("/api", catalogue::routes::router())
+        .nest("/api/catalogue", catalogue::csv_routes())
+        .merge(pos::connect::routes())
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .with_state(state)
 }

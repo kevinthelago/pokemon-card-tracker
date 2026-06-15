@@ -17,19 +17,20 @@ pub fn TeamPage() -> impl IntoView {
     let params = use_params_map();
 
     let workspace_id = move || {
-        params.with(|p| p.get("wid").and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
     };
 
     // Bump to force a refetch after any mutation.
     let (reload, set_reload) = signal(0u32);
 
-    let team = Resource::new(
-        move || (workspace_id(), reload.get()),
-        |(wid, _)| async move {
+    let team = LocalResource::new(move || {
+        let wid = workspace_id();
+        let _ = reload.get();
+        async move {
             let wid = wid?;
             api::fetch_team(wid).await.ok()
-        },
-    );
+        }
+    });
 
     let trigger_reload = move || set_reload.update(|n| *n += 1);
 
@@ -40,7 +41,7 @@ pub fn TeamPage() -> impl IntoView {
 
             <Suspense fallback=move || view! { <p class="loading">"Loading team\u{2026}"</p> }>
                 {move || {
-                    match team.get() {
+                    match team.get().as_deref() {
                         None => view! { <p class="loading">"Loading\u{2026}"</p> }.into_any(),
                         Some(None) => {
                             view! {
@@ -54,7 +55,7 @@ pub fn TeamPage() -> impl IntoView {
                             let wid = workspace_id().unwrap_or_default();
                             let on_change = Callback::new(move |_: ()| trigger_reload());
                             view! {
-                                <TeamContent workspace_id=wid data=data on_change=on_change />
+                                <TeamContent workspace_id=wid data=data.clone() on_change=on_change />
                             }
                             .into_any()
                         }
@@ -136,7 +137,7 @@ fn PendingInviteRow(
             let on_change = on_change.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match api::resend_invite(workspace_id, invite_id).await {
-                    Ok(_) => on_change.call(()),
+                    Ok(_) => on_change.run(()),
                     Err(e) => set_error.set(Some(format!("Failed to resend: {e}"))),
                 }
                 set_busy.set(false);
@@ -152,7 +153,7 @@ fn PendingInviteRow(
             let on_change = on_change.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match api::cancel_invite(workspace_id, invite_id).await {
-                    Ok(_) => on_change.call(()),
+                    Ok(_) => on_change.run(()),
                     Err(e) => set_error.set(Some(format!("Failed to cancel: {e}"))),
                 }
                 set_busy.set(false);

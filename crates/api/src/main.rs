@@ -1,14 +1,14 @@
+use std::sync::Arc;
+
 use anyhow::Context;
+use axum::Extension;
+use cardguard_api::{
+    app, auth, crypto::EncryptionKey, integrations::pokemontcg::PokemonTcgClient, pos,
+    NullPosProvider, PosProvider,
+};
 use dotenvy::dotenv;
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-mod app;
-mod auth;
-mod db;
-mod error;
-mod models;
-mod workspace;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,11 +31,28 @@ async fn main() -> anyhow::Result<()> {
         .context("failed to run migrations")?;
 
     let mailer = auth::build_mailer()?;
-    let base_url = std::env::var("APP_BASE_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".into());
+    let base_url =
+        std::env::var("APP_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".into());
 
-    let state = app::AppState { pool, mailer, base_url };
-    let router = app::create_router(state);
+    let encryption_key_hex =
+        std::env::var("ENCRYPTION_KEY").context("ENCRYPTION_KEY must be set")?;
+    let encryption_key = EncryptionKey::from_hex(&encryption_key_hex)
+        .context("ENCRYPTION_KEY must be 64 hex chars (32 bytes)")?;
+
+    let tcg_api_key = std::env::var("POKEMON_TCG_API_KEY").ok();
+    let tcg_client = Arc::new(PokemonTcgClient::new(tcg_api_key));
+
+    let provider: Arc<dyn PosProvider> = Arc::new(NullPosProvider);
+
+    pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
+
+    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client };
+
+    let router = app::create_router()
+        .merge(pos::reconcile::routes())
+        .merge(pos::mapping::routes())
+        .layer(Extension(Arc::clone(&provider)))
+        .with_state(state);
 
     let addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into());
     let listener = tokio::net::TcpListener::bind(&addr).await?;

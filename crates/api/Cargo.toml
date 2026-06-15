@@ -3,12 +3,16 @@ name = "cardguard-api"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "cardguard_api"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cardguard-api"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "multipart"] }
 axum-extra = { version = "0.9", features = ["cookie"] }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -22,7 +26,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
-lettre = { version = "0.11", features = ["tokio1-native-tls", "builder"] }
+lettre = { version = "0.11", features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 rand = "0.8"
 dotenvy = "0.15"
 argon2 = "0.5"
@@ -31,3 +35,16 @@ sha2 = "0.10"
 hex = "0.4"
 cookie = { version = "0.18", features = ["percent-encode"] }
 time = "0.3"
+async-trait = { workspace = true }
+base64 = "0.22"
+csv = "1"
+aes-gcm = "0.10"
+hmac = "0.12"
+urlencoding = "2"
+bytes = "1"
+domain   = { path = "../domain" }
+reqwest  = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+governor = "0.6"
+
+[dev-dependencies]
+httpmock = "0.7"

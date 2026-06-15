@@ -32,7 +32,10 @@ pub fn InviteForm(workspace_id: Uuid, on_sent: Callback<()>) -> impl IntoView {
         set_submitting.set(true);
         set_error.set(None);
 
-        let body = SendInviteBody { email: email_val, role: role.get() };
+        let body = SendInviteBody {
+            email: email_val,
+            role: role.get(),
+        };
         let on_sent = on_sent.clone();
 
         wasm_bindgen_futures::spawn_local(async move {
@@ -40,7 +43,7 @@ pub fn InviteForm(workspace_id: Uuid, on_sent: Callback<()>) -> impl IntoView {
                 Ok(_) => {
                     set_email.set(String::new());
                     set_role.set(MemberRole::Staff);
-                    on_sent.call(());
+                    on_sent.run(());
                 }
                 Err(e) => {
                     set_error.set(Some(user_friendly_error(&e)));
@@ -115,5 +118,31 @@ fn user_friendly_error(raw: &str) -> String {
         "A pending invitation already exists for this email. Use Resend to re-deliver it.".into()
     } else {
         format!("Failed to send invitation: {raw}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_member_error_is_friendly() {
+        let msg = user_friendly_error("HTTP 409: already a member");
+        assert!(msg.contains("already a member"));
+        assert!(!msg.starts_with("Failed"));
+    }
+
+    #[test]
+    fn duplicate_invite_error_is_friendly() {
+        let msg = user_friendly_error("HTTP 409: pending invite already exists");
+        assert!(msg.contains("pending invitation"));
+        assert!(msg.contains("Resend"));
+    }
+
+    #[test]
+    fn unknown_error_falls_through() {
+        let msg = user_friendly_error("HTTP 500: server exploded");
+        assert!(msg.starts_with("Failed to send invitation"));
+        assert!(msg.contains("server exploded"));
     }
 }

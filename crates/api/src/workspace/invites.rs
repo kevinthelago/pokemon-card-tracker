@@ -1,8 +1,11 @@
 //! T1 — Invites & membership management API
 //!
 //! Seller-only. All mutating endpoints require the caller to be an `owner`
-//! of the target workspace. The last-owner invariant is enforced by the DB
-//! query that counts remaining owners before any role change or removal.
+//! of the target workspace. The last-owner invariant is enforced before any
+//! role change or removal.
+//!
+//! Uses runtime sqlx queries (no `query!` macro) so the workspace compiles
+//! without a DATABASE_URL at check time.
 
 use axum::{
     extract::{Path, State},
@@ -11,39 +14,31 @@ use axum::{
     routing::{delete, get, patch, post},
     Json, Router,
 };
-use chrono::Utc;
-use lettre::{
-    message::header::ContentType, AsyncTransport, Message as EmailMessage,
-};
+use chrono::{DateTime, Utc};
+use lettre::{message::header::ContentType, AsyncTransport, Message as EmailMessage};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 use uuid::Uuid;
 
 use crate::{
     app::AppState,
     auth::{AuthUser, OptionalAuthUser},
     error::AppError,
-    models::{
-        invite::WorkspaceInvite,
-        workspace::{MemberRole, WorkspaceKind, WorkspaceMember},
-    },
+    models::workspace::{MemberRole, WorkspaceKind},
 };
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        // Team overview: members + pending invites
         .route("/workspaces/:wid/team", get(list_team))
-        // Invite management
         .route("/workspaces/:wid/invites", post(send_invite))
         .route("/workspaces/:wid/invites/:iid/resend", post(resend_invite))
         .route("/workspaces/:wid/invites/:iid", delete(cancel_invite))
-        // Member management
         .route("/workspaces/:wid/members/:uid", patch(change_member_role))
         .route("/workspaces/:wid/members/:uid", delete(remove_member))
-        // Accept flow — token-based, no auth required (redirects to sign-up if unauthed)
         .route("/invites/accept/:token", get(accept_invite))
 }
 
@@ -66,7 +61,7 @@ pub struct MemberDto {
     pub email: String,
     pub name: String,
     pub role: MemberRole,
-    pub joined_at: chrono::DateTime<Utc>,
+    pub joined_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,9 +69,9 @@ pub struct InviteDto {
     pub id: Uuid,
     pub email: String,
     pub role: MemberRole,
-    pub expires_at: chrono::DateTime<Utc>,
-    pub created_at: chrono::DateTime<Utc>,
-    pub resent_at: Option<chrono::DateTime<Utc>>,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub resent_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,26 +80,73 @@ pub struct TeamResponse {
     pub pending_invites: Vec<InviteDto>,
 }
 
+// ─── Internal query row types ─────────────────────────────────────────────────
+
+#[derive(FromRow)]
+struct WorkspaceAccessRow {
+    kind: WorkspaceKind,
+    role: Option<MemberRole>,
+}
+
+#[derive(FromRow)]
+struct MemberRow {
+    user_id: Uuid,
+    role: MemberRole,
+    joined_at: DateTime<Utc>,
+    email: String,
+    name: String,
+}
+
+#[derive(FromRow)]
+struct InviteRow {
+    id: Uuid,
+    email: String,
+    role: MemberRole,
+    expires_at: DateTime<Utc>,
+    created_at: DateTime<Utc>,
+    resent_at: Option<DateTime<Utc>>,
+}
+
+#[derive(FromRow)]
+struct InviteRowWithToken {
+    id: Uuid,
+    email: String,
+    role: MemberRole,
+    expires_at: DateTime<Utc>,
+    created_at: DateTime<Utc>,
+    resent_at: Option<DateTime<Utc>>,
+    token: String,
+}
+
+#[derive(FromRow)]
+struct AcceptRow {
+    id: Uuid,
+    workspace_id: Uuid,
+    email: String,
+    role: MemberRole,
+    expires_at: DateTime<Utc>,
+    accepted_at: Option<DateTime<Utc>>,
+    cancelled_at: Option<DateTime<Utc>>,
+}
+
 // ─── Guards ──────────────────────────────────────────────────────────────────
 
-/// Verify that the workspace exists, is a seller workspace, and that `caller`
-/// is an owner. Returns the workspace kind on success.
 async fn require_owner(
     pool: &sqlx::PgPool,
     workspace_id: Uuid,
     caller_id: Uuid,
 ) -> Result<(), AppError> {
-    let row = sqlx::query!(
+    let row = sqlx::query_as::<_, WorkspaceAccessRow>(
         r#"
-        SELECT w.kind AS "kind: WorkspaceKind", wm.role AS "role?: MemberRole"
+        SELECT w.kind, wm.role
         FROM workspaces w
         LEFT JOIN workspace_members wm
                ON wm.workspace_id = w.id AND wm.user_id = $2
         WHERE w.id = $1
         "#,
-        workspace_id,
-        caller_id,
     )
+    .bind(workspace_id)
+    .bind(caller_id)
     .fetch_optional(pool)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -120,23 +162,19 @@ async fn require_owner(
     }
 }
 
-/// Count remaining owners in a workspace (used to enforce last-owner invariant).
 async fn count_owners(pool: &sqlx::PgPool, workspace_id: Uuid) -> Result<i64, AppError> {
-    let count = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1 AND role = 'owner'"#,
-        workspace_id,
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1 AND role = 'owner'",
     )
+    .bind(workspace_id)
     .fetch_one(pool)
-    .await?
-    .unwrap_or(0);
+    .await?;
     Ok(count)
 }
 
 // ─── Handlers ────────────────────────────────────────────────────────────────
 
 /// GET /api/workspaces/:wid/team
-///
-/// Returns all members and pending (non-expired, non-cancelled) invites.
 async fn list_team(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -144,17 +182,16 @@ async fn list_team(
 ) -> Result<Json<TeamResponse>, AppError> {
     require_owner(&state.pool, wid, auth.id).await?;
 
-    let members = sqlx::query!(
+    let members = sqlx::query_as::<_, MemberRow>(
         r#"
-        SELECT wm.user_id, wm.role AS "role: MemberRole", wm.joined_at,
-               u.email, u.name
+        SELECT wm.user_id, wm.role, wm.joined_at, u.email, u.name
         FROM workspace_members wm
         JOIN users u ON u.id = wm.user_id
         WHERE wm.workspace_id = $1
         ORDER BY wm.joined_at ASC
         "#,
-        wid,
     )
+    .bind(wid)
     .fetch_all(&state.pool)
     .await?
     .into_iter()
@@ -167,9 +204,9 @@ async fn list_team(
     })
     .collect();
 
-    let pending_invites = sqlx::query!(
+    let pending_invites = sqlx::query_as::<_, InviteRow>(
         r#"
-        SELECT id, email, role AS "role: MemberRole", expires_at, created_at, resent_at
+        SELECT id, email, role, expires_at, created_at, resent_at
         FROM workspace_invites
         WHERE workspace_id = $1
           AND accepted_at IS NULL
@@ -177,8 +214,8 @@ async fn list_team(
           AND expires_at > NOW()
         ORDER BY created_at ASC
         "#,
-        wid,
     )
+    .bind(wid)
     .fetch_all(&state.pool)
     .await?
     .into_iter()
@@ -196,9 +233,6 @@ async fn list_team(
 }
 
 /// POST /api/workspaces/:wid/invites
-///
-/// Send a new invite. Rejects if the email belongs to an existing member or a
-/// duplicate pending invite already exists.
 async fn send_invite(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -209,8 +243,7 @@ async fn send_invite(
 
     let email = body.email.trim().to_lowercase();
 
-    // Reject if already a member
-    let is_member = sqlx::query_scalar!(
+    let is_member: bool = sqlx::query_scalar(
         r#"
         SELECT EXISTS (
             SELECT 1 FROM workspace_members wm
@@ -218,12 +251,11 @@ async fn send_invite(
             WHERE wm.workspace_id = $1 AND u.email = $2
         )
         "#,
-        wid,
-        email,
     )
+    .bind(wid)
+    .bind(&email)
     .fetch_one(&state.pool)
-    .await?
-    .unwrap_or(false);
+    .await?;
 
     if is_member {
         return Err(AppError::Conflict(
@@ -231,8 +263,7 @@ async fn send_invite(
         ));
     }
 
-    // Reject duplicate pending invite
-    let duplicate = sqlx::query_scalar!(
+    let duplicate: bool = sqlx::query_scalar(
         r#"
         SELECT EXISTS (
             SELECT 1 FROM workspace_invites
@@ -243,12 +274,11 @@ async fn send_invite(
               AND expires_at > NOW()
         )
         "#,
-        wid,
-        email,
     )
+    .bind(wid)
+    .bind(&email)
     .fetch_one(&state.pool)
-    .await?
-    .unwrap_or(false);
+    .await?;
 
     if duplicate {
         return Err(AppError::Conflict(
@@ -257,31 +287,32 @@ async fn send_invite(
     }
 
     let token = generate_token();
-    // Clone before the query bind so the original is available for the email task.
     let token_for_email = token.clone();
-    let invite = sqlx::query!(
+
+    let invite = sqlx::query_as::<_, InviteRow>(
         r#"
         INSERT INTO workspace_invites (workspace_id, email, role, token, invited_by)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, email, role AS "role: MemberRole", expires_at, created_at, resent_at
+        RETURNING id, email, role, expires_at, created_at, resent_at
         "#,
-        wid,
-        email,
-        body.role as MemberRole,
-        token,
-        auth.id,
     )
+    .bind(wid)
+    .bind(&email)
+    .bind(body.role)
+    .bind(&token)
+    .bind(auth.id)
     .fetch_one(&state.pool)
     .await?;
 
-    // Send email asynchronously — failure leaves the invite as pending with a
-    // resend option, so we log but don't abort the request.
+    // Fire-and-forget; failure leaves the invite pending/resendable.
     let mailer = state.mailer.clone();
     let base_url = state.base_url.clone();
     let invite_email = email.clone();
     tokio::spawn(async move {
-        if let Err(e) = send_invite_email(&mailer, &base_url, &invite_email, &token_for_email).await {
-            tracing::warn!("invite email delivery failed for {invite_email}: {e}");
+        if let Err(e) =
+            send_invite_email(&mailer, &base_url, &invite_email, &token_for_email).await
+        {
+            tracing::warn!("invite email failed for {invite_email}: {e}");
         }
     });
 
@@ -299,8 +330,6 @@ async fn send_invite(
 }
 
 /// POST /api/workspaces/:wid/invites/:iid/resend
-///
-/// Resets the expiry to 7 days from now and re-sends the email.
 async fn resend_invite(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -308,7 +337,7 @@ async fn resend_invite(
 ) -> Result<Json<InviteDto>, AppError> {
     require_owner(&state.pool, wid, auth.id).await?;
 
-    let invite = sqlx::query!(
+    let invite = sqlx::query_as::<_, InviteRowWithToken>(
         r#"
         UPDATE workspace_invites
            SET resent_at  = NOW(),
@@ -317,11 +346,11 @@ async fn resend_invite(
            AND workspace_id = $2
            AND accepted_at IS NULL
            AND cancelled_at IS NULL
-        RETURNING id, email, role AS "role: MemberRole", expires_at, created_at, resent_at, token
+        RETURNING id, email, role, expires_at, created_at, resent_at, token
         "#,
-        iid,
-        wid,
     )
+    .bind(iid)
+    .bind(wid)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -332,7 +361,7 @@ async fn resend_invite(
     let email = invite.email.clone();
     tokio::spawn(async move {
         if let Err(e) = send_invite_email(&mailer, &base_url, &email, &token).await {
-            tracing::warn!("resend email delivery failed for {email}: {e}");
+            tracing::warn!("resend email failed for {email}: {e}");
         }
     });
 
@@ -347,8 +376,6 @@ async fn resend_invite(
 }
 
 /// DELETE /api/workspaces/:wid/invites/:iid
-///
-/// Marks the invite as cancelled so it is no longer visible or redeemable.
 async fn cancel_invite(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -356,7 +383,7 @@ async fn cancel_invite(
 ) -> Result<StatusCode, AppError> {
     require_owner(&state.pool, wid, auth.id).await?;
 
-    let updated = sqlx::query!(
+    let updated = sqlx::query(
         r#"
         UPDATE workspace_invites
            SET cancelled_at = NOW()
@@ -365,9 +392,9 @@ async fn cancel_invite(
            AND accepted_at IS NULL
            AND cancelled_at IS NULL
         "#,
-        iid,
-        wid,
     )
+    .bind(iid)
+    .bind(wid)
     .execute(&state.pool)
     .await?
     .rows_affected();
@@ -379,8 +406,6 @@ async fn cancel_invite(
 }
 
 /// PATCH /api/workspaces/:wid/members/:uid
-///
-/// Changes a member's role. Blocks downgrading the last owner.
 async fn change_member_role(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -389,32 +414,30 @@ async fn change_member_role(
 ) -> Result<StatusCode, AppError> {
     require_owner(&state.pool, wid, auth.id).await?;
 
-    // Enforce last-owner invariant when downgrading to staff
     if matches!(body.role, MemberRole::Staff) {
-        let current_role: Option<MemberRole> = sqlx::query_scalar!(
-            r#"SELECT role AS "role: MemberRole" FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"#,
-            wid,
-            uid,
+        let current_role: Option<MemberRole> = sqlx::query_scalar(
+            "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
         )
+        .bind(wid)
+        .bind(uid)
         .fetch_optional(&state.pool)
         .await?;
 
-        if matches!(current_role, Some(MemberRole::Owner)) && count_owners(&state.pool, wid).await? <= 1 {
+        if matches!(current_role, Some(MemberRole::Owner))
+            && count_owners(&state.pool, wid).await? <= 1
+        {
             return Err(AppError::Forbidden(
                 "cannot downgrade the last owner; promote another member to owner first".into(),
             ));
         }
     }
 
-    let updated = sqlx::query!(
-        r#"
-        UPDATE workspace_members SET role = $3
-         WHERE workspace_id = $1 AND user_id = $2
-        "#,
-        wid,
-        uid,
-        body.role as MemberRole,
+    let updated = sqlx::query(
+        "UPDATE workspace_members SET role = $3 WHERE workspace_id = $1 AND user_id = $2",
     )
+    .bind(wid)
+    .bind(uid)
+    .bind(body.role)
     .execute(&state.pool)
     .await?
     .rows_affected();
@@ -426,9 +449,6 @@ async fn change_member_role(
 }
 
 /// DELETE /api/workspaces/:wid/members/:uid
-///
-/// Removes a member from the workspace. Their workspace-owned records (cards,
-/// flags) are retained. Blocks removing the last owner.
 async fn remove_member(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -436,25 +456,27 @@ async fn remove_member(
 ) -> Result<StatusCode, AppError> {
     require_owner(&state.pool, wid, auth.id).await?;
 
-    let current_role: Option<MemberRole> = sqlx::query_scalar!(
-        r#"SELECT role AS "role: MemberRole" FROM workspace_members WHERE workspace_id = $1 AND user_id = $2"#,
-        wid,
-        uid,
+    let current_role: Option<MemberRole> = sqlx::query_scalar(
+        "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
     )
+    .bind(wid)
+    .bind(uid)
     .fetch_optional(&state.pool)
     .await?;
 
-    if matches!(current_role, Some(MemberRole::Owner)) && count_owners(&state.pool, wid).await? <= 1 {
+    if matches!(current_role, Some(MemberRole::Owner))
+        && count_owners(&state.pool, wid).await? <= 1
+    {
         return Err(AppError::Forbidden(
             "cannot remove the last owner of a workspace".into(),
         ));
     }
 
-    let deleted = sqlx::query!(
+    let deleted = sqlx::query(
         "DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
-        wid,
-        uid,
     )
+    .bind(wid)
+    .bind(uid)
     .execute(&state.pool)
     .await?
     .rows_affected();
@@ -467,25 +489,21 @@ async fn remove_member(
 
 /// GET /api/invites/accept/:token
 ///
-/// Accept flow:
-///  - Authenticated user → join workspace, mark accepted, redirect to workspace.
-///  - Unauthenticated user → redirect to sign-up with the token in the query string
-///    so the sign-up flow can redirect back here after account creation.
+/// Authenticated → join workspace + mark accepted + redirect.
+/// Unauthenticated → redirect to sign-up with token in query string.
 async fn accept_invite(
     State(state): State<AppState>,
     OptionalAuthUser(maybe_user): OptionalAuthUser,
     Path(token): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Validate the invite token
-    let invite = sqlx::query!(
+    let invite = sqlx::query_as::<_, AcceptRow>(
         r#"
-        SELECT id, workspace_id, email, role AS "role: MemberRole", expires_at,
-               accepted_at, cancelled_at
+        SELECT id, workspace_id, email, role, expires_at, accepted_at, cancelled_at
         FROM workspace_invites
         WHERE token = $1
         "#,
-        token,
     )
+    .bind(&token)
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::NotFound)?;
@@ -505,44 +523,37 @@ async fn accept_invite(
     let user = match maybe_user {
         Some(u) => u,
         None => {
-            // Redirect to sign-up; the UI will redirect back after account creation.
-            let redirect_url = format!(
-                "{}/signup?invite_token={}",
-                state.base_url, token
-            );
+            let redirect_url =
+                format!("{}/signup?invite_token={}", state.base_url, token);
             return Ok(Redirect::temporary(&redirect_url).into_response());
         }
     };
 
-    // Verify the accepting user's email matches the invite (security check).
     if user.email.to_lowercase() != invite.email.to_lowercase() {
         return Err(AppError::Forbidden(
             "this invitation was sent to a different email address".into(),
         ));
     }
 
-    // Idempotently add to workspace_members and mark invite accepted.
     let mut tx = state.pool.begin().await?;
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO workspace_members (workspace_id, user_id, role)
         VALUES ($1, $2, $3)
         ON CONFLICT (workspace_id, user_id) DO NOTHING
         "#,
-        invite.workspace_id,
-        user.id,
-        invite.role as MemberRole,
     )
+    .bind(invite.workspace_id)
+    .bind(user.id)
+    .bind(invite.role)
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query!(
-        "UPDATE workspace_invites SET accepted_at = NOW() WHERE id = $1",
-        invite.id,
-    )
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("UPDATE workspace_invites SET accepted_at = NOW() WHERE id = $1")
+        .bind(invite.id)
+        .execute(&mut *tx)
+        .await?;
 
     tx.commit().await?;
 
@@ -568,7 +579,7 @@ async fn send_invite_email(
 ) -> anyhow::Result<()> {
     let accept_url = format!("{}/api/invites/accept/{}", base_url, token);
     let body = format!(
-        "You have been invited to join a CardGuard workspace.\n\nAccept your invitation here:\n{}\n\nThis link expires in 7 days.",
+        "You have been invited to join a CardGuard workspace.\n\nAccept your invitation:\n{}\n\nThis link expires in 7 days.",
         accept_url
     );
 
@@ -581,4 +592,49 @@ async fn send_invite_email(
 
     mailer.send(email).await?;
     Ok(())
+}
+
+// ─── Unit tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_token_is_40_alphanumeric_chars() {
+        let token = generate_token();
+        assert_eq!(token.len(), 40);
+        assert!(token.chars().all(|c| c.is_ascii_alphanumeric()));
+    }
+
+    #[test]
+    fn generate_token_is_unique() {
+        let t1 = generate_token();
+        let t2 = generate_token();
+        assert_ne!(t1, t2);
+    }
+
+    #[test]
+    fn invite_dto_role_round_trips_through_serde() {
+        use crate::models::workspace::MemberRole;
+        let body = SendInviteBody {
+            email: "a@b.com".into(),
+            role: MemberRole::Owner,
+        };
+        let json = serde_json::to_string(&serde_json::json!({
+            "email": body.email,
+            "role": "owner"
+        }))
+        .unwrap();
+        let parsed: SendInviteBody = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.email, "a@b.com");
+        assert!(matches!(parsed.role, MemberRole::Owner));
+    }
+
+    #[test]
+    fn change_role_body_deserializes_staff() {
+        let json = r#"{"role":"staff"}"#;
+        let body: ChangeRoleBody = serde_json::from_str(json).unwrap();
+        assert!(matches!(body.role, crate::models::workspace::MemberRole::Staff));
+    }
 }

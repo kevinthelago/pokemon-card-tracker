@@ -71,7 +71,11 @@ fn MemberRow(
         let current_role = current_role.clone();
         move |ev: leptos::ev::Event| {
             let val = event_target_value(&ev);
-            let new_role = if val == "owner" { MemberRole::Owner } else { MemberRole::Staff };
+            let new_role = if val == "owner" {
+                MemberRole::Owner
+            } else {
+                MemberRole::Staff
+            };
             if new_role == current_role {
                 return;
             }
@@ -81,7 +85,7 @@ fn MemberRow(
             wasm_bindgen_futures::spawn_local(async move {
                 let body = ChangeRoleBody { role: new_role };
                 match api::change_member_role(workspace_id, user_id, &body).await {
-                    Ok(_) => on_change.call(()),
+                    Ok(_) => on_change.run(()),
                     Err(e) => set_error.set(Some(user_friendly_change_error(&e))),
                 }
                 set_busy.set(false);
@@ -97,7 +101,7 @@ fn MemberRow(
             let on_change = on_change.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 match api::remove_member(workspace_id, user_id).await {
-                    Ok(_) => on_change.call(()),
+                    Ok(_) => on_change.run(()),
                     Err(e) => set_error.set(Some(user_friendly_remove_error(&e))),
                 }
                 set_busy.set(false);
@@ -169,5 +173,35 @@ fn user_friendly_remove_error(raw: &str) -> String {
         "Cannot remove the last owner of a workspace.".into()
     } else {
         format!("Failed to remove member: {raw}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn change_last_owner_gives_helpful_message() {
+        let msg = user_friendly_change_error("403: cannot downgrade the last owner");
+        assert!(msg.contains("only owner"));
+        assert!(msg.contains("Promote"));
+    }
+
+    #[test]
+    fn change_unknown_error_falls_through() {
+        let msg = user_friendly_change_error("HTTP 500: oops");
+        assert!(msg.starts_with("Failed to change role"));
+    }
+
+    #[test]
+    fn remove_last_owner_gives_helpful_message() {
+        let msg = user_friendly_remove_error("403: cannot remove the last owner");
+        assert!(msg.contains("last owner"));
+    }
+
+    #[test]
+    fn remove_unknown_error_falls_through() {
+        let msg = user_friendly_remove_error("HTTP 500: oops");
+        assert!(msg.starts_with("Failed to remove member"));
     }
 }
