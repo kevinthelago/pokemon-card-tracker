@@ -1,0 +1,31 @@
+# Fly.io deployment configuration for the CardGuard web (Leptos CSR) app.
+# The API server is deployed separately — see fly.toml at the repo root.
+
+app = "cardguard-web"
+primary_region = "iad"
+
+[build]
+  dockerfile = "deploy/Dockerfile.web"
+
+[env]
+  PORT = "8080"
+  API_BASE_URL = "https://api.cardguard.app"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
