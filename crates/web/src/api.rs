@@ -18,7 +18,7 @@ use crate::routes::stolen::queue::QueueReport;
 
 const API_BASE: &str = "/api";
 
-async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, String> {
+pub async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, String> {
     let resp = Request::get(&format!("{API_BASE}{path}"))
         .send()
         .await
@@ -493,4 +493,19 @@ pub async fn bulk_inventory(workspace_id: Uuid, op: &BulkOp) -> Result<u64, Stri
     )
     .await?;
     Ok(r.affected)
+}
+
+// ─── Valuation API ────────────────────────────────────────────────────────────
+
+/// POST with no body and no response body — used for fire-and-forget actions.
+pub async fn post_void(path: &str) -> Result<(), String> {
+    let resp = Request::post(&format!("{API_BASE}{path}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}: {}", resp.status(), text));
+    }
+    Ok(())
 }

@@ -43,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
 
     let tcg_api_key = std::env::var("POKEMON_TCG_API_KEY").ok();
     let tcg_client = Arc::new(PokemonTcgClient::new(tcg_api_key));
+    let valuation = app::build_valuation_service(pool.clone());
 
     let psa_api_key = std::env::var("PSA_API_KEY").ok();
     let grading = Arc::new(GradingService::new(pool.clone(), psa_api_key, 3600));
@@ -51,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
     pos::reconcile::spawn_reconciliation_scheduler(pool.clone(), Arc::clone(&provider));
 
-    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client, grading };
+    let state = app::AppState { pool, mailer, base_url, encryption_key, tcg_client, grading, valuation };
 
     let router = app::create_router()
         .merge(pos::reconcile::routes())

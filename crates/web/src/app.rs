@@ -23,6 +23,7 @@ use crate::routes::{
     risk::RiskDashboardPage,
     settings::{pos::PosSettingsPage, team::TeamPage},
     stolen::{DisputePage, ModeratorQueue, MyReports, ReportForm},
+    value::{CardHistoryPage, ValuePage},
     verify::VerifyPage,
 };
 
@@ -76,6 +77,8 @@ pub fn App() -> impl IntoView {
                 <Route path=path!("/verify") view=VerifyPage />
                 <Route path=path!("/workspaces/:wid/inventory") view=InventoryListPage />
                 <Route path=path!("/workspaces/:wid/inventory/:id") view=InventoryDetailPage />
+                <Route path=path!("/value/:wid") view=ValuePage />
+                <Route path=path!("/value/:wid/card/:printing_id/history") view=CardHistoryPage />
             </Routes>
         </Router>
     }

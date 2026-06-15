@@ -6,4 +6,5 @@ pub mod reconcile;
 pub mod risk;
 pub mod settings;
 pub mod stolen;
+pub mod value;
 pub mod verify;

@@ -11,6 +11,8 @@ use crate::{
     integrations::pokemontcg::PokemonTcgClient,
     pos, workspace,
 };
+use crate::catalogue::valuation::ValuationService;
+use crate::integrations::pricecharting::PriceChartingClient;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -20,6 +22,18 @@ pub struct AppState {
     pub encryption_key: EncryptionKey,
     pub tcg_client: Arc<PokemonTcgClient>,
     pub grading: Arc<GradingService>,
+    pub valuation: Arc<ValuationService>,
+}
+
+impl AppState {
+    pub fn valuation_service(&self) -> &ValuationService {
+        &self.valuation
+    }
+}
+
+pub fn build_valuation_service(pool: PgPool) -> Arc<ValuationService> {
+    let api_key = std::env::var("PRICECHARTING_API_KEY").unwrap_or_default();
+    Arc::new(ValuationService::new(pool, PriceChartingClient::new(api_key)))
 }
 
 pub fn create_router() -> Router<AppState> {
@@ -35,6 +49,7 @@ pub fn create_router() -> Router<AppState> {
         .nest("/api", catalogue::routes::router())
         .nest("/api", crate::grading::routes::router())
         .nest("/api/catalogue", catalogue::csv_routes())
+        .nest("/api", catalogue::valuation_routes::routes())
         .merge(pos::connect::routes())
         .layer(TraceLayer::new_for_http())
         .layer(cors)
