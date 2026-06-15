@@ -1,0 +1,24 @@
+[package]
+name = "cardguard-api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+tokio = { workspace = true }
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+async-trait = { workspace = true }
+dotenvy = "0.15"
+
+[dev-dependencies]
+tokio = { workspace = true }
