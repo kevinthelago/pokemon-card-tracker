@@ -1,10 +1,10 @@
 //! Stolen-card reporting screens.
 //!
-//! Routes (all nested under the main `<Routes>`):
-//!   `/stolen/report`           — Submit a new stolen-card report
-//!   `/stolen/my-reports`       — Current user's submitted reports
-//!   `/stolen/queue`            — Platform-moderator moderation queue
-//!   `/stolen/dispute/:id`      — Dispute a report (for the accused owner)
+//! Routes:
+//!   /stolen/report         — Submit a new report
+//!   /stolen/my-reports     — My submitted reports
+//!   /stolen/queue          — Platform-moderator queue
+//!   /stolen/dispute/:id    — Dispute a report
 
 pub mod dispute;
 pub mod my_reports;

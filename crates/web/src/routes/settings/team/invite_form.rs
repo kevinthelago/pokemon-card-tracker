@@ -32,7 +32,10 @@ pub fn InviteForm(workspace_id: Uuid, on_sent: Callback<()>) -> impl IntoView {
         set_submitting.set(true);
         set_error.set(None);
 
-        let body = SendInviteBody { email: email_val, role: role.get() };
+        let body = SendInviteBody {
+            email: email_val,
+            role: role.get(),
+        };
         let on_sent = on_sent.clone();
 
         wasm_bindgen_futures::spawn_local(async move {

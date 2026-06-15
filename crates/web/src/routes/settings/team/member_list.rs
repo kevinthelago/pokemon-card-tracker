@@ -71,7 +71,11 @@ fn MemberRow(
         let current_role = current_role.clone();
         move |ev: leptos::ev::Event| {
             let val = event_target_value(&ev);
-            let new_role = if val == "owner" { MemberRole::Owner } else { MemberRole::Staff };
+            let new_role = if val == "owner" {
+                MemberRole::Owner
+            } else {
+                MemberRole::Staff
+            };
             if new_role == current_role {
                 return;
             }
