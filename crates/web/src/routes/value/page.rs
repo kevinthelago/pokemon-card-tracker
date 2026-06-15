@@ -64,13 +64,11 @@ pub fn ValuePage() -> impl IntoView {
     let (refreshing, set_refreshing) = signal(false);
     let (refresh_error, set_refresh_error) = signal(Option::<String>::None);
 
-    let valuations = Resource::new(
-        move || (workspace_id(), reload.get()),
-        |(wid, _)| async move {
-            let wid = wid?;
-            fetch_valuations(wid).await.ok()
-        },
-    );
+    let valuations = LocalResource::new(move || {
+        let wid = workspace_id();
+        let _ = reload.get();
+        async move { fetch_valuations(wid?).await.ok() }
+    });
 
     let handle_refresh = move |_| {
         let Some(wid) = workspace_id() else { return };
@@ -105,7 +103,7 @@ pub fn ValuePage() -> impl IntoView {
             </div>
 
             <Suspense fallback=move || view! { <LoadingSkeleton /> }>
-                {move || match valuations.get() {
+                {move || match valuations.get().as_deref() {
                     None => view! { <LoadingSkeleton /> }.into_any(),
                     Some(None) => view! {
                         <div class="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
@@ -113,10 +111,13 @@ pub fn ValuePage() -> impl IntoView {
                             <p class="text-sm">"Ensure you are signed in and the workspace ID is valid."</p>
                         </div>
                     }.into_any(),
-                    Some(Some(data)) => view! {
-                        <CollectionTotalWidget total=data.total_usd count=data.data.len() />
-                        <ValuationTable items=data.data />
-                    }.into_any(),
+                    Some(Some(data)) => {
+                        let data = data.clone();
+                        view! {
+                            <CollectionTotalWidget total=data.total_usd count=data.data.len() />
+                            <ValuationTable items=data.data />
+                        }.into_any()
+                    },
                 }}
             </Suspense>
         </div>

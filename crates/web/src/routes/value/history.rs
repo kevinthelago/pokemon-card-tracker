@@ -47,16 +47,14 @@ pub fn CardHistoryPage() -> impl IntoView {
     let params = use_params_map();
     let printing_id = move || params.with(|p| p.get("printing_id").unwrap_or_default());
     let workspace_id = move || {
-        params.with(|p| p.get("wid").and_then(|s| Uuid::parse_str(s).ok()))
+        params.with(|p| p.get("wid").as_deref().and_then(|s| Uuid::parse_str(s).ok()))
     };
 
-    let history = Resource::new(
-        move || (printing_id(), workspace_id()),
-        |(pid, wid)| async move {
-            let wid = wid?;
-            fetch_history(&pid, wid).await.ok()
-        },
-    );
+    let history = LocalResource::new(move || {
+        let pid = printing_id();
+        let wid = workspace_id();
+        async move { fetch_history(&pid, wid?).await.ok() }
+    });
 
     view! {
         <div class="p-6 space-y-6 max-w-4xl mx-auto">
@@ -68,7 +66,7 @@ pub fn CardHistoryPage() -> impl IntoView {
             <h1 class="text-2xl font-bold text-gray-900">"Price History"</h1>
 
             <Suspense fallback=move || view! { <ChartSkeleton /> }>
-                {move || match history.get() {
+                {move || match history.get().as_deref() {
                     None => view! { <ChartSkeleton /> }.into_any(),
                     Some(None) => view! {
                         <div class="rounded-lg bg-red-50 border border-red-200 p-4 text-red-700">
@@ -78,9 +76,12 @@ pub fn CardHistoryPage() -> impl IntoView {
                     Some(Some(data)) if data.data.is_empty() => view! {
                         <EmptyHistoryState />
                     }.into_any(),
-                    Some(Some(data)) => view! {
-                        <PriceHistoryContent points=data.data printing_id=data.printing_id />
-                    }.into_any(),
+                    Some(Some(data)) => {
+                        let data = data.clone();
+                        view! {
+                            <PriceHistoryContent points=data.data />
+                        }.into_any()
+                    },
                 }}
             </Suspense>
         </div>
@@ -90,7 +91,7 @@ pub fn CardHistoryPage() -> impl IntoView {
 // ── Sub-components ─────────────────────────────────────────────────────────
 
 #[component]
-fn PriceHistoryContent(points: Vec<HistoryPoint>, printing_id: String) -> impl IntoView {
+fn PriceHistoryContent(points: Vec<HistoryPoint>) -> impl IntoView {
     let mut sorted = points.clone();
     sorted.sort_by(|a, b| a.captured_at.cmp(&b.captured_at));
 
