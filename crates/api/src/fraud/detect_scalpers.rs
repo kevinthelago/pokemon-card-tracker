@@ -802,8 +802,8 @@ mod tests {
 
     // ── detection engine tests ────────────────────────────────────────────────
 
-    #[sqlx::test(migrations = "../../migrations")]
-    #[ignore = "requires DATABASE_URL and Postgres"]
+    #[ignore = "requires DATABASE_URL"]
+    #[sqlx::test]
     async fn anon_transaction_never_flagged(db: PgPool) {
         let state = test_state(db.clone());
         let ws = seed_workspace(&db).await;
@@ -812,8 +812,8 @@ mod tests {
         assert!(flags.is_empty());
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    #[ignore = "requires DATABASE_URL and Postgres"]
+    #[ignore = "requires DATABASE_URL"]
+    #[sqlx::test]
     async fn allowlisted_buyer_never_flagged(db: PgPool) {
         let state = test_state(db.clone());
         let ws = seed_workspace(&db).await;
@@ -830,8 +830,8 @@ mod tests {
         assert!(flags.is_empty());
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    #[ignore = "requires DATABASE_URL and Postgres"]
+    #[ignore = "requires DATABASE_URL"]
+    #[sqlx::test]
     async fn detection_disabled_skips(db: PgPool) {
         let state = test_state(db.clone());
         let ws = seed_workspace(&db).await;
@@ -849,8 +849,8 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    #[ignore = "requires DATABASE_URL and Postgres"]
+    #[ignore = "requires DATABASE_URL"]
+    #[sqlx::test]
     async fn bulk_pattern_detected(db: PgPool) {
         let state = test_state(db.clone());
         let ws = seed_workspace(&db).await;
@@ -862,8 +862,8 @@ mod tests {
         assert!(flags[0].title.contains("bulk"));
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    #[ignore = "requires DATABASE_URL and Postgres"]
+    #[ignore = "requires DATABASE_URL"]
+    #[sqlx::test]
     async fn bulk_within_limit_not_flagged(db: PgPool) {
         let state = test_state(db.clone());
         let ws = seed_workspace(&db).await;
@@ -873,8 +873,8 @@ mod tests {
         assert!(flags.is_empty());
     }
 
-    #[sqlx::test(migrations = "../../migrations")]
-    #[ignore = "requires DATABASE_URL and Postgres"]
+    #[ignore = "requires DATABASE_URL"]
+    #[sqlx::test]
     async fn sweep_pattern_detected(db: PgPool) {
         let state = test_state(db.clone());
         let ws = seed_workspace(&db).await;
