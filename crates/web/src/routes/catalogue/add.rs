@@ -27,7 +27,7 @@ pub struct SearchResults {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ScanResult {
     pub barcode: String,
     /// "graded" | "sealed_product" | "printing" | "unknown"
@@ -153,20 +153,20 @@ where
 #[component]
 fn SearchStep<F>(on_select: F) -> impl IntoView
 where
-    F: Fn(PrintingView) + Clone + 'static,
+    F: Fn(PrintingView) + Clone + Send + Sync + 'static,
 {
     let (query, set_query) = signal(String::new());
     let (submitted, set_submitted) = signal(String::new());
 
-    let results = Resource::new(
-        move || submitted.get(),
-        |q| async move {
+    let results = LocalResource::new(move || {
+        let q = submitted.get();
+        async move {
             if q.is_empty() {
                 return Ok::<Option<SearchResults>, String>(None);
             }
             fetch_printings(&q).await.map(Some)
-        },
-    );
+        }
+    });
 
     let on_submit = move |ev: web_sys::SubmitEvent| {
         ev.prevent_default();
@@ -191,7 +191,7 @@ where
             </form>
 
             <Suspense fallback=|| view! { <p class="loading">"Searching..."</p> }>
-                {move || match results.get() {
+                {move || match results.get().as_deref() {
                     None => view! { <div></div> }.into_any(),
                     Some(Ok(None)) => view! { <div></div> }.into_any(),
                     Some(Ok(Some(data))) if data.items.is_empty() => view! {
@@ -200,10 +200,11 @@ where
                         </div>
                     }.into_any(),
                     Some(Ok(Some(data))) => {
+                        let items = data.items.clone();
                         let on_select2 = on_select_clone.clone();
                         view! {
                             <ul class="printing-list">
-                                {data.items.into_iter().map(|p| {
+                                {items.into_iter().map(|p| {
                                     let p_clone = p.clone();
                                     let on_s = on_select2.clone();
                                     view! {
@@ -227,9 +228,12 @@ where
                             </ul>
                         }.into_any()
                     }
-                    Some(Err(e)) => view! {
-                        <p class="error">"Error: "{e}</p>
-                    }.into_any(),
+                    Some(Err(e)) => {
+                        let e = e.clone();
+                        view! {
+                            <p class="error">"Error: "{e}</p>
+                        }.into_any()
+                    },
                 }}
             </Suspense>
         </div>

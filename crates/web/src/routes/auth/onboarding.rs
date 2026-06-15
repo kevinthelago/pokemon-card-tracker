@@ -1,6 +1,7 @@
 use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos_router::components::A;
+use wasm_bindgen_futures::spawn_local;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -255,15 +256,15 @@ pub fn WorkspaceSwitcher() -> impl IntoView {
     let access_token = use_access_token();
     let (open, set_open) = signal(false);
 
-    let workspaces = Resource::new(
-        move || access_token.get(),
-        |tok| async move {
+    let workspaces = LocalResource::new(move || {
+        let tok = access_token.get();
+        async move {
             match tok {
                 Some(t) => api_list_workspaces(&t).await.unwrap_or_default(),
                 None => vec![],
             }
-        },
-    );
+        }
+    });
 
     let switch = move |ws_id: Uuid| {
         let tok = access_token.get().unwrap_or_default();
@@ -301,7 +302,7 @@ pub fn WorkspaceSwitcher() -> impl IntoView {
                     <Suspense fallback=move || view! {
                         <div class="px-4 py-2 text-sm text-gray-400">"Loading\u{2026}"</div>
                     }>
-                        {move || workspaces.get().map(|list| list.into_iter().map(|ws| {
+                        {move || workspaces.get().as_deref().map(|list| list.to_vec().into_iter().map(|ws| {
                             let ws_id = ws.id;
                             let is_active = session.get()
                                 .map(|u| u.workspace_id == ws_id)
@@ -326,7 +327,7 @@ pub fn WorkspaceSwitcher() -> impl IntoView {
                     <div class="border-t border-gray-100 mt-1 pt-1">
                         <A
                             href="/auth/onboarding"
-                            class="block px-4 py-2 text-sm text-indigo-600 hover:bg-indigo-50"
+                            attr:class="block px-4 py-2 text-sm text-indigo-600 hover:bg-indigo-50"
                         >
                             "+ New workspace"
                         </A>

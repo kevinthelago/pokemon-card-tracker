@@ -37,7 +37,7 @@ struct GradingVerificationView {
 #[component]
 pub fn ScanStep<F>(on_result: F) -> impl IntoView
 where
-    F: Fn(ScanResult) + Clone + 'static,
+    F: Fn(ScanResult) + Clone + Send + Sync + 'static,
 {
     let video_ref = NodeRef::<leptos::html::Video>::new();
     let canvas_ref = NodeRef::<leptos::html::Canvas>::new();
@@ -63,14 +63,15 @@ where
     // Poll for barcode decode every 400 ms once the camera is active.
     let video_ref_scan = video_ref.clone();
     let canvas_ref_scan = canvas_ref.clone();
+    let on_result_scan = on_result.clone();
     Effect::new(move |_| {
         if camera_state.get() != CameraState::Active {
-            return;
+            return None;
         }
         let video = video_ref_scan.get()?;
         let canvas = canvas_ref_scan.get()?;
 
-        let on_result_inner = on_result.clone();
+        let on_result_inner = on_result_scan.clone();
 
         wasm_bindgen_futures::spawn_local(async move {
             loop {

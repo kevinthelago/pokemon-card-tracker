@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
+use wasm_bindgen_futures::spawn_local;
 
 use super::session::{api_login, use_access_token, use_session, SessionUser};
 
@@ -95,7 +96,7 @@ pub fn LoginPage() -> impl IntoView {
                         </div>
 
                         <div class="flex items-center justify-end">
-                            <A href="/auth/reset-password" class="text-sm text-indigo-600 hover:underline">
+                            <A href="/auth/reset-password" attr:class="text-sm text-indigo-600 hover:underline">
                                 "Forgot password?"
                             </A>
                         </div>
@@ -111,7 +112,7 @@ pub fn LoginPage() -> impl IntoView {
 
                     <p class="text-center text-sm text-gray-500">
                         "Don\u{2019}t have an account? "
-                        <A href="/auth/register" class="text-indigo-600 hover:underline">"Sign up"</A>
+                        <A href="/auth/register" attr:class="text-indigo-600 hover:underline">"Sign up"</A>
                     </p>
                 </div>
             </div>

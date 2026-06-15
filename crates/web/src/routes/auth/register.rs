@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
+use wasm_bindgen_futures::spawn_local;
 
 use super::session::{api_register, use_access_token, use_session, SessionUser};
 
@@ -148,7 +149,7 @@ pub fn RegisterPage() -> impl IntoView {
 
                     <p class="text-center text-sm text-gray-500">
                         "Already have an account? "
-                        <A href="/auth/login" class="text-indigo-600 hover:underline">"Sign in"</A>
+                        <A href="/auth/login" attr:class="text-indigo-600 hover:underline">"Sign in"</A>
                     </p>
                 </div>
             </div>

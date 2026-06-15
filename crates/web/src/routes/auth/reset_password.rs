@@ -1,6 +1,7 @@
 use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_query_map};
+use wasm_bindgen_futures::spawn_local;
 
 const API: &str = "/api";
 
@@ -76,7 +77,7 @@ pub fn RequestResetPage() -> impl IntoView {
                                 <p class="text-sm text-gray-500">
                                     "If an account exists for that address we\u{2019}ve sent a reset link."
                                 </p>
-                                <A href="/auth/login" class="inline-block text-sm text-indigo-600 hover:underline">
+                                <A href="/auth/login" attr:class="inline-block text-sm text-indigo-600 hover:underline">
                                     "Back to sign in"
                                 </A>
                             </div>
@@ -119,7 +120,7 @@ pub fn RequestResetPage() -> impl IntoView {
                                 </form>
 
                                 <p class="text-center text-sm text-gray-500">
-                                    <A href="/auth/login" class="text-indigo-600 hover:underline">"Back to sign in"</A>
+                                    <A href="/auth/login" attr:class="text-indigo-600 hover:underline">"Back to sign in"</A>
                                 </p>
                             </div>
                         }.into_any()
@@ -135,7 +136,7 @@ pub fn RequestResetPage() -> impl IntoView {
 #[component]
 pub fn ConfirmResetPage() -> impl IntoView {
     let query = use_query_map();
-    let token = move || query.with(|q| q.get("token").cloned().unwrap_or_default());
+    let token = move || query.with(|q| q.get("token").unwrap_or_default());
 
     let (password, set_password) = signal(String::new());
     let (confirm, set_confirm) = signal(String::new());
@@ -186,7 +187,7 @@ pub fn ConfirmResetPage() -> impl IntoView {
                                 <div class="text-green-600 text-4xl">"✓"</div>
                                 <h1 class="text-xl font-semibold text-gray-900">"Password updated"</h1>
                                 <p class="text-sm text-gray-500">"Your password has been changed."</p>
-                                <A href="/auth/login" class="inline-block text-sm font-medium text-indigo-600 hover:underline">
+                                <A href="/auth/login" attr:class="inline-block text-sm font-medium text-indigo-600 hover:underline">
                                     "Sign in with new password"
                                 </A>
                             </div>
